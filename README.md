@@ -2,7 +2,7 @@
 
 Projection Mapping im Browser, für zu Hause und **komplett auf einem MacBook**. Auf dem Mac-Display steuerst du, der Beamer hängt als zweiter Bildschirm dran und zeigt die Ausgabe. Ecken und Masken setzt du mit Maus oder Trackpad, wahlweise auf der Vorschau oder **direkt auf der Projektion**. Alles läuft lokal, ohne Cloud und ohne Konten.
 
-> **Stand: v0.2.** Neu sind Mac-Betrieb mit Chrome, mehrere Flächen (Ebenen, sperren, ausblenden, duplizieren), Masken (pro Fläche oder global, invertierbar, weiche Kante), Bilder, Farbflächen, Deckkraft, Mischmodi, Einpassung, Rückgängig/Wiederherstellen und Mapping direkt auf dem Beamer-Bild. Was noch kommt, steht in [SPEC.md](SPEC.md).
+> **Stand: v0.3.** Neu sind Masken auf Masken (Masken-Stapel pro Fläche mit Hinzufügen/Ausschneiden/Schnittmenge), Masken-Ebenen, die Flächen aus Flächen ausschneiden, Freihand-Zeichnen von Masken, Snap (abschaltbar), ein Raster mit einstellbarer Linienstärke zum Prüfen der Verzerrung und 31 Effekte (Feuer, Stroboskop, Discokugel, Lichtkegel, Kantenlauf, Lauflicht, Wasser, Fenster und mehr) mit Reglern. Ältere Stände liegen auf den Branches `v0.2` usw. Was noch kommt, steht in [SPEC.md](SPEC.md).
 
 ---
 
@@ -45,31 +45,69 @@ Die Steuerung zeigt oben „Ausgabe 1280×720 · 60 fps“, sobald alles verbund
 
 **Bearbeiten- und Show-Modus** (Taste `E` oder Knopf oben): Im Bearbeitungsmodus zeigt die Ausgabe Umrisse, Ecken, Masken und den Mauszeiger. Im Show-Modus ist nur das Bild zu sehen.
 
+### Ebenen
+
+Links stehen alle **Ebenen**: Flächen und Masken-Ebenen. Was in der Liste **oben** steht, liegt im Bild **vorne**. ↑/↓ ändern die Reihenfolge, 👁 blendet aus, 🔒 sperrt gegen versehentliches Verschieben, ein Doppelklick benennt um.
+
 ### Flächen (Werkzeug „Fläche“, Taste `V`)
 
-- **„+ Fläche“** links legt eine neue Fläche an. Die Liste zeigt die oberste Ebene oben. ↑/↓ ändern die Reihenfolge, 👁 blendet aus, 🔒 sperrt gegen versehentliches Verschieben. Doppelklick auf den Namen benennt um.
-- **Ecken ziehen:** auf der Bühne in der Steuerung oder **direkt auf der Projektion**. Dafür den Mauszeiger auf den Beamer-Bildschirm bewegen und die Ecke dort ziehen, wo du sie auf dem Objekt siehst. Das ist der präziseste Weg.
-- **Feinjustierung:** Ecke anklicken (oder `Tab` für die nächste Ecke), dann **Pfeiltasten** = 1 Beamer-Pixel, mit **⇧** = 10 Pixel. Auf der Projektion zeigt ein Fadenkreuz die gewählte Ecke.
-- **Ganze Fläche:** in die Fläche klicken und ziehen = verschieben. **Trackpad-Pinch** = skalieren, **⌥ + Scrollen** = drehen. Alternativ die Knöpfe unter „Transformieren“ (gedrückt halten wiederholt).
-- Ohne gewählte Ecke (`Esc`) verschieben die Pfeiltasten die ganze Fläche.
+- **„+ Fläche“** legt eine neue Fläche an (Viereck mit Corner Pin).
+- **Ecken ziehen:** auf der Bühne in der Steuerung oder **direkt auf der Projektion**. Dafür den Mauszeiger auf den Beamer-Bildschirm bewegen und die Ecke dort ziehen, wo du sie auf dem Objekt siehst.
+- **Feinjustierung:** Ecke anklicken (oder `Tab` für die nächste Ecke), dann **Pfeiltasten** = 1 Beamer-Pixel, mit **⇧** = 10 Pixel.
+- **Ganze Fläche:** hineinklicken und ziehen = verschieben, **Trackpad-Pinch** = skalieren, **⌥ + Scrollen** = drehen. Ohne gewählte Ecke (`Esc`) verschieben die Pfeiltasten die ganze Fläche.
+
+### Snap (Taste `S`, standardmäßig an)
+
+Gezogene Ecken und Maskenpunkte **rasten ein**: an Ecken anderer Flächen, an Maskenpunkten, auf Kanten und am Bildrand. Ein gelbes Fadenkreuz zeigt den Fangpunkt. So schließen zwei Flächen lückenlos aneinander an. Abschalten mit dem 🧲-Knopf oder `S`. Für einen einzelnen Zug ohne Snap beim Ziehen **⌥** gedrückt halten.
+
+### Raster zum Prüfen der Verzerrung (Taste `G`)
+
+**▦ Raster** legt ein Gitter über die Flächen und folgt dabei genau der Perspektive. So siehst du sofort, ob Linien gerade laufen und die Kästchen gleichmäßig wirken. Einstellbar sind Spalten, Zeilen, **Linienstärke (1–30 px)**, Farbe, Diagonalen und „nur gewählte Fläche“. Die Linienstärke bleibt auf dem Beamer überall gleich, auch in stark verzerrten Ecken. Auf dunklen oder weit entfernten Objekten einfach dicker stellen.
+(`⇧G` bzw. „Testbild: Gitter“ projiziert dagegen ein Testgitter über das ganze Beamerbild, um den Beamer selbst auszurichten.)
 
 ### Inhalte (rechte Seitenleiste)
 
-**Leer, Testgitter, Farbe, Bild oder Video.** Dazu kommen Deckkraft, Mischmodus (Normal, Additiv, Bildschirm, Multiplizieren) und bei Bild/Video die Einpassung:
+**Leer, Testgitter, Farbe, Bild, Video oder Effekt.** Dazu kommen Deckkraft, Mischmodus (Normal, Additiv, Bildschirm, Multiplizieren) und bei Bild/Video die Einpassung (strecken, füllen, einpassen).
 
-- **Strecken:** füllt die Fläche, das Seitenverhältnis kann sich ändern.
-- **Füllen:** füllt die Fläche, überstehende Ränder werden abgeschnitten.
-- **Einpassen:** zeigt das ganze Bild, freie Ränder bleiben schwarz.
+### Effekte ✨
+
+Inhalt **„Effekt“** wählen, dann eine Kategorie und einen Effekt. Alle Regler wirken sofort, ein Doppelklick auf einen Regler stellt den Standardwert her.
+
+| Kategorie | Effekte |
+| --- | --- |
+| Licht | Stroboskop ⚠, Pulsieren, Lichtkegel (Moving Heads), Lichtwelle |
+| Disco & Party | Farb-Strobe ⚠, Discokugel, Disco-Spots, Equalizer, Konfetti |
+| Kontur | **Kantenlauf** (Licht fährt den Rand entlang), Lauflicht (Glühbirnen), Neon-Rahmen |
+| Natur | Feuer, Wasser, Nebel, Sternenhimmel, Regen |
+| Muster | Linienmuster, Schachbrett, Ringe, Kaleidoskop |
+| Farbe | Plasma, Farbverlauf, Regenbogen |
+| Digital | Glitch, Matrix-Regen, Scanlines |
+| Architektur | Fenster (gehen nacheinander an), Sonnenlauf, Bauphasen, Aufbau/Wipe |
+
+⚠ Stroboskop-Effekte sind auf 12 Hz begrenzt. Blitzlicht kann bei fotosensiblen Menschen Anfälle auslösen.
+
+Eigene Effekte: In `shared/effects.ts` einen Eintrag mit GLSL-Funktion `vec4 effect(vec2 uv)` und Parameterliste ergänzen. Regler und Prüfung entstehen automatisch.
 
 ### Masken (Werkzeug „Maske“, Taste `M`)
 
-Masken begrenzen, wo Licht hinfällt, z. B. nur auf das Objekt und nicht auf die Wand dahinter.
+Masken bestimmen, wo Licht hinfällt, z. B. nur auf das Objekt und nicht auf die Wand. Es gibt zwei Arten:
 
-- **Flächenmaske:** gehört zu einer Fläche und bewegt sich mit, wenn du deren Ecken änderst. **Globale Maske:** liegt fest im Beamerbild und wirkt auf alles. Welche Art neu entsteht, wählst du oben in der Werkzeugleiste.
-- **Zeichnen:** Mit dem Masken-Werkzeug ins Leere klicken, so entsteht Punkt für Punkt ein Umriss. Am besten direkt auf der Projektion um das Objekt herum klicken. **`Esc`** schließt die Maske ab.
-- **Bearbeiten:** Punkte ziehen. Ein Klick auf eine Kante fügt einen Punkt ein, **`Entf`/`⌫`** löscht den gewählten Punkt, Pfeiltasten verschieben ihn pixelgenau.
-- **Invertieren:** blendet das Innere aus statt das Äußere. **Weiche Kante:** sanfter Rand in Pixeln.
-- Mehrere normale Masken ergeben zusammen die sichtbare Fläche, invertierte Masken schneiden daraus Löcher heraus.
+**1. Masken einer Fläche (Masken-Stapel, links unten).** Sie gehören zur Fläche und wandern mit, wenn du deren Ecken änderst. Jede Maske hat eine **Wirkung**:
+- **＋ Hinzufügen:** Das Innere wird sichtbar. Steht diese Maske ganz oben, ist *nur* ihr Inneres zu sehen.
+- **− Ausschneiden:** Das Innere wird herausgeschnitten.
+- **∩ Schnittmenge:** Sichtbar bleibt nur, was auch in dieser Maske liegt.
+
+Die Masken werden von oben nach unten verrechnet, so entstehen **Masken auf Masken**. Beispiel Haus: Maske 1 „Hinzufügen“ = Umriss der Fassade, Maske 2 „Ausschneiden“ = ein Fenster, Maske 3 „Hinzufügen“ = das Fensterkreuz wieder sichtbar machen. Die Reihenfolge änderst du mit ↑/↓.
+
+**2. Masken-Ebenen ✂ (in der Ebenenliste).** Sie liegen fest im Beamerbild und wirken auf **alle Ebenen darunter**. „Ausschneiden“ stanzt ein Loch in alles darunter, „Nur Inneres“ lässt nur das Innere übrig. So schneidest du **Flächen aus Flächen** aus. Für die exakte Form einer Fläche: Fläche wählen → rechts **„✂ Form aus Ebenen darunter ausschneiden“**.
+
+**Zeichnen:**
+- Fläche wählen → **„+ Maske zeichnen“** (bzw. **„+ Maske ✂“** für eine Masken-Ebene).
+- **Freihand:** mit gedrückter Maustaste den Umriss nachfahren, aus dem Pfad werden automatisch Punkte. **Oder** Punkt für Punkt klicken. Am besten direkt auf der Projektion um das Objekt herum.
+- **Enter** schließt die Maske ab. Der nächste Klick beginnt eine neue, auch innerhalb einer bestehenden.
+- **Bearbeiten:** Punkte ziehen (mit Snap), Klick auf eine Kante fügt einen Punkt ein, **Entf/⌫** löscht den gewählten Punkt, Pfeiltasten verschieben ihn pixelgenau. Eine Maske wählst du über einen ihrer Punkte oder in der Liste.
+- **Weiche Kante:** sanfter Rand in Pixeln.
+- Farben auf der Bühne: grün = hinzufügen, rot = ausschneiden, gelb = Schnittmenge.
 
 ### Tastenkürzel (in Steuerung und Ausgabe)
 
@@ -78,11 +116,13 @@ Masken begrenzen, wo Licht hinfällt, z. B. nur auf das Objekt und nicht auf die
 | `E` | Bearbeiten ↔ Show |
 | `F` | Vollbild (nur im Ausgabefenster) |
 | `V` / `M` | Werkzeug Fläche / Maske |
-| `G` | Testgitter über das ganze Bild an/aus |
+| `S` | Snap an/aus (⌥ beim Ziehen: einmalig ohne Snap) |
+| `G` / `⇧G` | Raster auf den Flächen / Testgitter über das ganze Bild |
 | Pfeile, ⇧+Pfeile | 1 px / 10 px verschieben |
 | `Tab`, ⇧`Tab` | nächste/vorige Ecke bzw. Maskenpunkt |
+| `Enter` | Maske abschließen |
 | `Entf`, `⌫` | Maskenpunkt löschen |
-| `Esc` | Auswahl aufheben / Maske abschließen |
+| `Esc` | Auswahl aufheben |
 | `⌘Z`, `⇧⌘Z` | Rückgängig / Wiederherstellen |
 | `⌘S` | Projekt speichern |
 | Pinch, ⌥+Scrollen | Fläche skalieren / drehen |
@@ -130,12 +170,12 @@ client/   Vite + React: /control (Steuerung), /output (Ausgabe)
 ```
 
 - **Zustand:** Der Server ist die einzige Quelle der Wahrheit. Fenster schicken Operationen (z. B. `setCorner`), der Server prüft sie, wendet sie mit demselben Reducer an und verteilt sie in fester Reihenfolge. Jedes Fenster wendet seine eigenen Operationen sofort an (optimistisch) und gleicht sie mit dem Echo ab. Schnelle Klicks und Tastenwiederholungen gehen so nicht verloren. Rückgängig/Wiederherstellen läuft auf dem Server, eine Ziehbewegung zählt als ein Schritt.
-- **Renderer:** WebGL2 ohne Bibliothek. Der Fragment-Shader rechnet jeden Pixel mit der inversen Homographie in die Inhaltskoordinate zurück. Das ergibt pixelgenaue Perspektive ohne Knick an der Diagonalen. Masken werden per Canvas 2D (mit Weichzeichner) in Alpha-Texturen gerastert: Flächenmasken im Inhaltsraum der Fläche, globale Masken im Ausgaberaum. Gearbeitet wird mit vormultipliziertem Alpha, daraus folgen die Mischmodi.
+- **Renderer:** WebGL2 ohne Bibliothek. Der Fragment-Shader rechnet jeden Pixel mit der inversen Homographie in die Inhaltskoordinate zurück. Das ergibt pixelgenaue Perspektive ohne Knick an der Diagonalen. Der Ebenenstapel wird von unten nach oben gezeichnet; Masken-Ebenen verrechnen das bisher Gezeichnete. Flächenmasken werden per Canvas 2D (Weichzeichner, Compositing für Hinzufügen/Ausschneiden/Schnittmenge) in eine Alpha-Textur im Inhaltsraum der Fläche gerastert. Effekte sind eigene Shader-Programme, die bei Bedarf kompiliert werden. Die Rasterlinien werden über `fwidth` in Bildschirmpixeln berechnet und haben deshalb überall dieselbe Dicke.
 - Die Steuerung zeigt eine Live-Vorschau mit demselben Renderer.
 
 ```bash
 npm run dev        # Entwicklungsmodus mit Hot Reload
-npm test           # Unit-Tests (Homographie, Geometrie, Zustand, Rückgängig)
+npm test           # Unit-Tests (Homographie, Geometrie, Zustand, Effekte, Rückgängig)
 npm run typecheck  # TypeScript strikt prüfen
 npm run build      # Produktions-Build nach dist/
 ```

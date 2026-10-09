@@ -126,7 +126,9 @@ export class Store {
 
   async load(id: string): Promise<void> {
     const file = await this.readProjectFile(id);
-    this.state = { project: file.project, view: { ...defaultView(), editMode: this.state.view.editMode } };
+    // Ansichtseinstellungen (Bearbeiten, Snap, Raster) beibehalten, Auswahl zurücksetzen
+    const { editMode, snap, grid } = this.state.view;
+    this.state = { project: file.project, view: { ...defaultView(), editMode, snap, grid } };
     this.meta.currentProjectId = id;
     this.meta.dirty = false;
     await this.afterProjectChange();

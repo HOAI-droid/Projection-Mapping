@@ -5,7 +5,7 @@ import { quadPixelSize } from '../../../../shared/geometry.js';
 import type { AppState, FitMode, MediaItem, Surface } from '../../../../shared/types.js';
 import { ImageCache } from './images';
 import { MaskCache } from './masks';
-import { Renderer, type DrawItem } from './renderer';
+import { hexToRgb, Renderer, type DrawItem } from './renderer';
 import { createTestGridCanvas } from './testgrid';
 import { VideoPool } from './videos';
 
@@ -36,24 +36,44 @@ export class Scene {
 
   /**
    * Zeichnet ein Bild. ref = Pixelgröße der echten Ausgabe; daraus folgen
-   * Seitenverhältnis der Flächen (für die Einpassung) und Feather-Breiten.
+   * Seitenverhältnis der Flächen (Einpassung, Effekte), Feather-Breiten und Rasterlinien.
    */
   render(state: AppState, media: readonly MediaItem[], ref: RefSize): { width: number; height: number } {
     const size = this.renderer.resize();
-    const project = state.project;
+    const { project, view } = state;
     if (project !== this.lastProject) {
       this.videos.sync(project);
       this.lastProject = project;
     }
+    // Pixel dieser Leinwand je Ausgabepixel (Vorschau ist kleiner als die Ausgabe)
+    const pxScale = size.width / Math.max(1, ref.width);
+    const grid = view.grid;
+    const gridColor = hexToRgb(grid.color);
 
     const items: DrawItem[] = [];
     const usedImages = new Set<string>();
-    const maskOwners = new Set<string>(['global']);
-    for (const s of project.surfaces) {
-      if (!s.visible || s.opacity <= 0) continue;
+    const maskOwners = new Set<string>();
+    for (const layer of project.layers) {
+      if (layer.kind === 'mask') {
+        if (!layer.enabled) continue;
+        maskOwners.add(layer.id);
+        // Region der Masken-Ebene als Alpha (Modus wirkt erst beim Verrechnen)
+        const tex = this.masks.get(layer.id, [{ ...layer, mode: 'add' }], size.width, size.height, pxScale, (p) => [
+          p.x * size.width,
+          p.y * size.height,
+        ]);
+        if (tex) items.push({ kind: 'mask', texture: tex, mode: layer.mode });
+        continue;
+      }
+
+      const s = layer;
+      if (!s.visible) continue;
+      const showGrid = grid.enabled && (!grid.onlySelected || s.id === view.selectedSurfaceId);
       const src = this.source(s, media, usedImages);
-      if (!src) continue;
+      if (!src && !showGrid) continue;
+      if (s.opacity <= 0 && !showGrid) continue;
       const px = quadPixelSize(s.corners, ref.width, ref.height);
+      const aspect = px.w / Math.max(1, px.h);
       maskOwners.add(s.id);
       const mask = this.masks.get(
         s.id,
@@ -64,27 +84,27 @@ export class Scene {
         (p) => [p.x * SURFACE_MASK_SIZE, p.y * SURFACE_MASK_SIZE],
       );
       items.push({
+        kind: 'surface',
         corners: s.corners,
-        texture: src.texture,
-        color: src.color,
+        source: src?.source ?? 'none',
+        texture: src?.texture ?? null,
+        color: src?.color ?? [0, 0, 0],
+        effect: s.content.type === 'effect' ? s.content.effect : null,
+        params: s.content.type === 'effect' ? s.content.params : null,
         opacity: s.opacity,
         blend: s.blend,
-        fitScale: src.aspect ? fitScale(s.fit, src.aspect, px.w / Math.max(1, px.h)) : [1, 1],
+        fitScale: src?.aspect ? fitScale(s.fit, src.aspect, aspect) : [1, 1],
         mask,
+        aspect,
+        seed: seedOf(s.id),
+        grid: showGrid
+          ? { cols: grid.cols, rows: grid.rows, thickness: grid.thickness * pxScale, color: gridColor, diagonals: grid.diagonals }
+          : null,
       });
     }
     this.images.retain(usedImages);
     this.masks.retain(maskOwners);
-
-    const globalMask = this.masks.get(
-      'global',
-      project.masks,
-      size.width,
-      size.height,
-      size.width / Math.max(1, ref.width),
-      (p) => [p.x * size.width, p.y * size.height],
-    );
-    this.renderer.draw(items, globalMask);
+    this.renderer.draw(items);
     return size;
   }
 
@@ -92,25 +112,34 @@ export class Scene {
     s: Surface,
     media: readonly MediaItem[],
     usedImages: Set<string>,
-  ): { texture: WebGLTexture | null; color: [number, number, number]; aspect: number | null } | null {
+  ): {
+    source: 'texture' | 'color' | 'effect';
+    texture: WebGLTexture | null;
+    color: [number, number, number];
+    aspect: number | null;
+  } | null {
     const c = s.content;
     switch (c.type) {
       case 'none':
         return null;
       case 'testgrid':
-        return { texture: this.grid, color: [0, 0, 0], aspect: null };
+        return { source: 'texture', texture: this.grid, color: [0, 0, 0], aspect: null };
       case 'color':
-        return { texture: null, color: hexToRgb(c.color), aspect: null };
+        return { source: 'color', texture: null, color: hexToRgb(c.color), aspect: null };
+      case 'effect':
+        return { source: 'effect', texture: null, color: [0, 0, 0], aspect: null };
       case 'image': {
         const item = media.find((m) => m.id === c.mediaId && m.status === 'ready');
         if (!item) return null;
         usedImages.add(item.id);
         const t = this.images.texture(item);
-        return t ? { texture: t.texture, color: [0, 0, 0], aspect: t.width / t.height } : null;
+        return t ? { source: 'texture', texture: t.texture, color: [0, 0, 0], aspect: t.width / t.height } : null;
       }
       case 'video': {
         const t = this.videos.texture(c.mediaId);
-        return t && t.height > 0 ? { texture: t.texture, color: [0, 0, 0], aspect: t.width / t.height } : null;
+        return t && t.height > 0
+          ? { source: 'texture', texture: t.texture, color: [0, 0, 0], aspect: t.width / t.height }
+          : null;
       }
     }
   }
@@ -133,7 +162,9 @@ export function fitScale(fit: FitMode, contentAspect: number, surfaceAspect: num
   return wider ? [surfaceAspect / contentAspect, 1] : [1, contentAspect / surfaceAspect];
 }
 
-function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+/** Stabiler Zufallswert 0…1 je Fläche, damit gleiche Effekte nicht synchron laufen */
+function seedOf(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return ((h >>> 0) % 10000) / 10000;
 }

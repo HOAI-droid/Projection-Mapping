@@ -66,7 +66,7 @@ export function App() {
             <Stage />
             <div className="shortcuts">
               Ziehen: Ecke/Fläche · Pinch: skalieren · ⌥+Scrollen: drehen · Pfeile: 1 px (⇧ 10 px) · Tab: nächste Ecke ·
-              ⌘Z/⇧⌘Z · V Fläche · M Maske · E Bearbeiten/Show · G Gitter
+              V Fläche · M Maske · S Snap · G Raster · ⇧G Testgitter · E Bearbeiten/Show · ⌘Z/⇧⌘Z
             </div>
           </main>
           <aside className="sidebar right">

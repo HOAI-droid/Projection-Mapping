@@ -540,3 +540,118 @@ h3 {
     overflow: visible;
   }
 }
+
+/* --- v0.3: Raster-Leiste, Effekte, Masken-Modi --- */
+.toolbar-wrap {
+  border-bottom: 1px solid var(--line);
+}
+.toolbar-wrap .toolbar {
+  border-bottom: 0;
+}
+.toolbar.sub {
+  padding-top: 0;
+  gap: 14px;
+}
+.mini {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.mini input[type='number'] {
+  width: 64px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 26px;
+  padding: 0 6px;
+  color: var(--text);
+}
+.mini input[type='color'] {
+  width: 44px;
+  height: 26px;
+}
+.mini.wide {
+  width: 180px;
+}
+.segmented.wrap {
+  flex-wrap: wrap;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  border-radius: 999px;
+}
+.chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.effect-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.effect-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.effect-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  min-height: 54px;
+  font-size: 11px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+}
+.effect-btn.selected {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  background: #172554;
+}
+.effect-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+.field span b {
+  color: var(--text);
+  font-weight: 600;
+}
+.warning {
+  background: #422006;
+  border: 1px solid #a16207;
+  color: #fde68a;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.mode-badge {
+  font-size: 12px;
+  font-weight: 700;
+  width: 18px;
+  text-align: center;
+}
+.mode-badge.add {
+  color: #4ade80;
+}
+.mode-badge.subtract {
+  color: #f87171;
+}
+.mode-badge.intersect {
+  color: #facc15;
+}
+.mask-row .row-num {
+  color: #f87171;
+}

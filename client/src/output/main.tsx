@@ -156,7 +156,7 @@ function OutputApp() {
             </button>
           )}
           <span>
-            E Bearbeiten aus · V Fläche · M Maske · Pfeile 1 px (⇧ 10 px) · ⌘Z Rückgängig · G Gitter
+            E Show · V Fläche · M Maske · S Snap · G Raster · Pfeile 1 px (⇧ 10 px) · ⌘Z Rückgängig
           </span>
         </div>
       )}

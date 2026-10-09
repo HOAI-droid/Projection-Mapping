@@ -1,121 +1,170 @@
-import { newMask, repeatGesture } from '../lib/editor/actions';
-import type { Mask } from '../../../shared/types.js';
+// Masken-Stapel der gewählten Fläche (wie in MadMapper: jede Maske fügt hinzu,
+// schneidet aus oder bildet die Schnittmenge – von oben nach unten verrechnet).
+
+import type { Mask, MaskMode } from '../../../shared/types.js';
+import { findSurface } from '../../../shared/state.js';
+import { repeatGesture, selectMask } from '../lib/editor/actions';
 import { conn, useSnapshot } from './store';
+
+export const MASK_MODE_LABELS: Record<MaskMode, string> = {
+  add: '＋ Hinzufügen',
+  subtract: '− Ausschneiden',
+  intersect: '∩ Schnittmenge',
+};
 
 export function MasksPanel() {
   const snap = useSnapshot();
   const { project, view } = snap.state!;
-  const surface = project.surfaces.find((s) => s.id === view.selectedSurfaceId) ?? null;
+  const surface = findSurface(project, view.selectedSurfaceId);
 
-  const select = (m: Mask) => conn.op({ kind: 'setView', patch: { tool: 'mask', selectedMaskId: m.id, selectedPoint: null } });
+  if (!surface) {
+    return (
+      <section className="panel-section">
+        <h3>Masken der Fläche</h3>
+        <p className="muted small">Fläche wählen, um ihr Masken zu geben. Für Masken über mehrere Flächen: „+ Maske ✂“ bei den Ebenen.</p>
+      </section>
+    );
+  }
 
-  const rows = (masks: Mask[]) =>
-    masks.map((m) => {
-      const active = m.id === view.selectedMaskId;
-      return (
-        <li key={m.id} className={`list-row${active ? ' active' : ''}`} onClick={() => select(m)}>
-          <input
-            type="checkbox"
-            checked={m.enabled}
-            title="Aktiv"
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => conn.op({ kind: 'updateMask', maskId: m.id, patch: { enabled: e.target.checked } })}
-          />
-          <span className="row-name">{m.name}</span>
-          <span className="row-meta">
-            {m.points.length} Pkt.{m.invert ? ' · invertiert' : ''}
-          </span>
-        </li>
-      );
-    });
+  const masks = surface.masks;
+  const sel = masks.find((m) => m.id === view.selectedMaskId) ?? null;
 
-  const sel =
-    project.masks.find((m) => m.id === view.selectedMaskId) ??
-    surface?.masks.find((m) => m.id === view.selectedMaskId) ??
-    null;
+  const startDrawing = () =>
+    conn.op({ kind: 'setView', patch: { tool: 'mask', maskScope: 'surface', selectedMaskId: null, selectedPoint: null } });
 
   return (
     <section className="panel-section">
       <div className="section-head">
-        <h3>Masken</h3>
-        <button className="small-btn" disabled={!surface} onClick={() => newMask(conn, false)} title="Maske für die gewählte Fläche">
-          + Fläche
-        </button>
-        <button className="small-btn" onClick={() => newMask(conn, true)} title="Maske im Ausgaberaum, wirkt auf alles">
-          + Global
+        <h3>Masken · {surface.name}</h3>
+        <button className="small-btn" onClick={startDrawing} title="Dann auf der Bühne oder der Projektion zeichnen">
+          + Maske zeichnen
         </button>
       </div>
-      {project.masks.length > 0 && (
-        <>
-          <div className="sub-head">Global</div>
-          <ul className="list">{rows(project.masks)}</ul>
-        </>
-      )}
-      {surface && surface.masks.length > 0 && (
-        <>
-          <div className="sub-head">{surface.name}</div>
-          <ul className="list">{rows(surface.masks)}</ul>
-        </>
-      )}
-      {project.masks.length === 0 && (!surface || surface.masks.length === 0) && (
+      {masks.length === 0 ? (
         <p className="muted small">
-          Werkzeug „Maske“ (M) wählen und auf der Bühne oder direkt auf der Projektion Punkte um das Objekt klicken.
+          „+ Maske zeichnen“, dann den Umriss mit gedrückter Maustaste nachfahren oder Punkt für Punkt klicken.
+          Die erste Maske bestimmt, was sichtbar ist; weitere Masken schneiden heraus oder fügen hinzu.
         </p>
+      ) : (
+        <ul className="list">
+          {masks.map((m, i) => (
+            <li key={m.id} className={`list-row${m.id === sel?.id ? ' active' : ''}`} onClick={() => selectMask(conn, m.id)}>
+              <input
+                type="checkbox"
+                checked={m.enabled}
+                title="Aktiv"
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => conn.op({ kind: 'updateMask', maskId: m.id, patch: { enabled: e.target.checked } })}
+              />
+              <span className="row-name">{m.name}</span>
+              <span className={`mode-badge ${m.mode}`}>{MASK_MODE_LABELS[m.mode].split(' ')[0]}</span>
+              <span className="row-meta">{m.points.length} P.</span>
+              <button
+                className="icon-btn"
+                disabled={i === 0}
+                title="Nach oben (früher verrechnen)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  conn.op({ kind: 'moveMask', maskId: m.id, index: i - 1 });
+                }}
+              >
+                ↑
+              </button>
+              <button
+                className="icon-btn"
+                disabled={i === masks.length - 1}
+                title="Nach unten"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  conn.op({ kind: 'moveMask', maskId: m.id, index: i + 1 });
+                }}
+              >
+                ↓
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
-      {sel && (
-        <div className="props">
-          <label className="field">
-            <span>Name</span>
-            <input
-              key={sel.id}
-              defaultValue={sel.name}
-              onBlur={(e) => {
-                const name = e.target.value.trim();
-                if (name && name !== sel.name) conn.op({ kind: 'updateMask', maskId: sel.id, patch: { name } });
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-            />
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={sel.invert}
-              onChange={(e) => conn.op({ kind: 'updateMask', maskId: sel.id, patch: { invert: e.target.checked } })}
-            />
-            Invertieren (Inneres ausblenden)
-          </label>
-          <label className="field">
-            <span>Weiche Kante {Math.round(sel.feather)} px</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={sel.feather}
-              onChange={(e) =>
-                conn.op(
-                  { kind: 'updateMask', maskId: sel.id, patch: { feather: Number(e.target.value) } },
-                  repeatGesture(`feather-${sel.id}`, 800),
-                )
-              }
-            />
-          </label>
-          <div className="button-row">
-            <button
-              className="danger"
-              onClick={() => {
-                conn.op({ kind: 'removeMask', maskId: sel.id });
-                conn.op({ kind: 'setView', patch: { selectedMaskId: null, selectedPoint: null } });
-              }}
-            >
-              Maske löschen
-            </button>
-          </div>
-          <p className="muted small">
-            Klick ins Leere: Punkt anhängen · Klick auf Kante: Punkt einfügen · Entf: Punkt löschen · Esc: fertig
-          </p>
-        </div>
-      )}
+      {sel && <MaskProps mask={sel} />}
     </section>
   );
 }
+
+/** Einstellungen einer Maske – auch für Masken-Ebenen verwendet */
+export function MaskProps({ mask, layer }: { mask: Mask; layer?: boolean }) {
+  const modes: MaskMode[] = layer ? ['subtract', 'intersect'] : ['add', 'subtract', 'intersect'];
+  return (
+    <div className="props">
+      <label className="field">
+        <span>Name</span>
+        <input
+          key={mask.id}
+          defaultValue={mask.name}
+          onBlur={(e) => {
+            const name = e.target.value.trim();
+            if (name && name !== mask.name) conn.op({ kind: 'updateMask', maskId: mask.id, patch: { name } });
+          }}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        />
+      </label>
+      <div className="field">
+        <span>Wirkung</span>
+        <div className="segmented">
+          {modes.map((m) => (
+            <button
+              key={m}
+              className={mask.mode === m ? 'active' : ''}
+              onClick={() => conn.op({ kind: 'updateMask', maskId: mask.id, patch: { mode: m } })}
+              title={MODE_HELP[m]}
+            >
+              {layer ? (m === 'subtract' ? '✂ Ausschneiden' : '◼ Nur Inneres') : MASK_MODE_LABELS[m]}
+            </button>
+          ))}
+        </div>
+        <span className="muted small">{layer ? LAYER_HELP[mask.mode] : MODE_HELP[mask.mode]}</span>
+      </div>
+      <label className="field">
+        <span>Weiche Kante {Math.round(mask.feather)} px</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={mask.feather}
+          onChange={(e) =>
+            conn.op(
+              { kind: 'updateMask', maskId: mask.id, patch: { feather: Number(e.target.value) } },
+              repeatGesture(`feather-${mask.id}`, 800),
+            )
+          }
+        />
+      </label>
+      <div className="button-row">
+        <button
+          className="danger"
+          onClick={() => {
+            conn.op({ kind: 'removeMask', maskId: mask.id });
+            conn.op({ kind: 'setView', patch: { selectedMaskId: null, selectedPoint: null } });
+          }}
+        >
+          Maske löschen
+        </button>
+      </div>
+      <p className="muted small">
+        Punkt ziehen · Klick auf Kante: Punkt einfügen · Klick ins Leere: Punkt anhängen · Entf: Punkt löschen · Enter: fertig
+      </p>
+    </div>
+  );
+}
+
+const MODE_HELP: Record<MaskMode, string> = {
+  add: 'Macht das Innere sichtbar. Steht sie ganz oben, ist nur ihr Inneres zu sehen.',
+  subtract: 'Schneidet das Innere aus dem bisher Sichtbaren heraus (z. B. ein Fenster).',
+  intersect: 'Lässt nur sichtbar, was auch innerhalb dieser Maske liegt.',
+};
+
+const LAYER_HELP: Record<MaskMode, string> = {
+  add: '',
+  subtract: 'Alles, was in der Ebenenliste darunter liegt, wird innerhalb der Maske ausgeschnitten.',
+  intersect: 'Von allem darunter bleibt nur das Innere der Maske übrig.',
+};

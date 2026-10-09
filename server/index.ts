@@ -9,6 +9,7 @@ import { networkInterfaces, hostname } from 'node:os';
 import { join } from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
+import { surfacesOf } from '../shared/state.js';
 import { config } from './config.js';
 import { Hub } from './hub.js';
 import { checkFfmpeg, isImageUpload, isVideoUpload, MediaLibrary } from './media.js';
@@ -64,7 +65,7 @@ async function main(): Promise<void> {
       return;
     }
     // Flächen, die das Medium zeigen, leeren
-    for (const s of store.state.project.surfaces) {
+    for (const s of surfacesOf(store.state.project)) {
       if ((s.content.type === 'video' || s.content.type === 'image') && s.content.mediaId === id) {
         const op = { kind: 'setContent', surfaceId: s.id, content: { type: 'none' } } as const;
         store.apply(op);

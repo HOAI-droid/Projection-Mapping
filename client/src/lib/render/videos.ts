@@ -1,6 +1,7 @@
 // Verwaltet <video>-Elemente und ihre Texturen. Ein Element pro Medium, auch wenn
 // mehrere Flächen dasselbe Video zeigen.
 
+import { surfacesOf } from '../../../../shared/state.js';
 import type { Project, VideoContent } from '../../../../shared/types.js';
 import { mediaUrl } from '../connection';
 import type { Renderer } from './renderer';
@@ -34,7 +35,7 @@ export class VideoPool {
   /** Gleicht Elemente mit dem Projekt ab: anlegen, Einstellungen übernehmen, entfernen. */
   sync(project: Project): void {
     const wanted = new Map<string, VideoContent>();
-    for (const s of project.surfaces) {
+    for (const s of surfacesOf(project)) {
       if (s.visible && s.content.type === 'video') wanted.set(s.content.mediaId, s.content);
     }
     for (const [id, e] of this.entries) {

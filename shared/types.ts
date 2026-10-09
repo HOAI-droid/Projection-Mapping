@@ -20,12 +20,23 @@ export interface VideoContent {
   playing: boolean;
 }
 
+/** Effekt-Parameter: Zahl (Regler) oder Farbe (#rrggbb) */
+export type EffectParams = Record<string, number | string>;
+
+export interface EffectContent {
+  type: 'effect';
+  /** ID aus der Effekt-Bibliothek (shared/effects.ts) */
+  effect: string;
+  params: EffectParams;
+}
+
 export type Content =
   | { type: 'none' }
   | { type: 'testgrid' }
   | { type: 'color'; color: string }
   | { type: 'image'; mediaId: string }
-  | VideoContent;
+  | VideoContent
+  | EffectContent;
 
 export type ContentType = Content['type'];
 
@@ -35,21 +46,37 @@ export type BlendMode = 'normal' | 'add' | 'multiply' | 'screen';
 export type FitMode = 'stretch' | 'fill' | 'fit';
 
 /**
+ * Wie eine Maske mit den Masken davor im Stapel verrechnet wird:
+ * add = Inneres hinzufügen (sichtbar machen) · subtract = Inneres ausschneiden ·
+ * intersect = nur die Überschneidung behalten.
+ */
+export type MaskMode = 'add' | 'subtract' | 'intersect';
+
+/**
  * Freiform-Maske. Bei Flächenmasken liegen die Punkte im Inhaltsraum der Fläche
- * (0…1, bewegt sich also mit dem Corner Pin), bei globalen Masken im Ausgaberaum.
+ * (0…1, bewegt sich also mit dem Corner Pin), bei Masken-Ebenen im Ausgaberaum.
  */
 export interface Mask {
   id: string;
   name: string;
   points: Point[];
-  /** false: nur das Innere zeigen · true: das Innere ausblenden */
-  invert: boolean;
+  mode: MaskMode;
   /** weiche Kante in Ausgabepixeln */
   feather: number;
   enabled: boolean;
 }
 
+/**
+ * Masken-Ebene im Ebenenstapel: wirkt auf alle Ebenen DARUNTER.
+ * subtract = Inneres ausschneiden, intersect = nur das Innere übrig lassen.
+ */
+export interface MaskLayer extends Mask {
+  kind: 'mask';
+  locked: boolean;
+}
+
 export interface Surface {
+  kind: 'surface';
   id: string;
   name: string;
   visible: boolean;
@@ -62,19 +89,32 @@ export interface Surface {
   masks: Mask[];
 }
 
+export type Layer = Surface | MaskLayer;
+
 export interface Project {
   /** Version des Dateiformats, für spätere Migrationen. */
-  format: 2;
+  format: 3;
   name: string;
-  /** Zeichenreihenfolge: Index 0 liegt ganz unten. */
-  surfaces: Surface[];
-  /** Masken im Ausgaberaum, wirken auf alle Flächen. */
-  masks: Mask[];
+  /** Ebenenstapel (Flächen und Masken-Ebenen): Index 0 liegt ganz unten. */
+  layers: Layer[];
+}
+
+/** Raster, das zur Kalibrierung über Flächen gelegt wird */
+export interface GridSettings {
+  enabled: boolean;
+  cols: number;
+  rows: number;
+  /** Linienstärke in Ausgabepixeln */
+  thickness: number;
+  color: string;
+  diagonals: boolean;
+  /** nur auf der gewählten Fläche statt auf allen */
+  onlySelected: boolean;
 }
 
 export type TestPattern = 'none' | 'grid' | 'white';
 export type Tool = 'surface' | 'mask';
-export type MaskScope = 'surface' | 'global';
+export type MaskScope = 'surface' | 'layer';
 
 /** Nicht gespeicherter Bearbeitungszustand, den alle Fenster teilen. */
 export interface ViewState {
@@ -82,12 +122,15 @@ export interface ViewState {
   editMode: boolean;
   testPattern: TestPattern;
   tool: Tool;
-  /** Wohin neue Masken gehören */
+  /** Wohin neue Masken gehören: in die gewählte Fläche oder als Masken-Ebene */
   maskScope: MaskScope;
   selectedSurfaceId: string | null;
   selectedCorner: CornerIndex | null;
   selectedMaskId: string | null;
   selectedPoint: number | null;
+  /** Punkte rasten an Ecken/Punkten anderer Flächen und Masken ein */
+  snap: boolean;
+  grid: GridSettings;
 }
 
 export interface MediaItem {

@@ -1,8 +1,12 @@
 // Masken werden mit Canvas 2D in eine Alpha-Textur gerastert (Weichzeichner = Feather).
 // Neu gerastert wird nur, wenn sich Punkte, Einstellungen oder Größe ändern.
 //
-// Regeln: Gibt es normale Masken, ist nur ihr Inneres sichtbar (Vereinigung).
-// Invertierte Masken schneiden ihr Inneres anschließend heraus.
+// Stapel-Regeln (von oben nach unten wie in der Liste):
+//   Beginnt der Stapel mit „hinzufügen“, ist zunächst nichts sichtbar, sonst alles.
+//   add = Inneres sichtbar machen · subtract = Inneres ausschneiden ·
+//   intersect = nur sichtbar lassen, was auch innerhalb dieser Maske liegt.
+// So lassen sich Masken auf Masken setzen (z. B. Fenster aus einer Fassade schneiden
+// und darin wieder ein Kreuz sichtbar machen).
 
 import type { Mask, Point } from '../../../../shared/types.js';
 import type { Renderer } from './renderer';
@@ -38,7 +42,7 @@ export class MaskCache {
       return null;
     }
     const fs = Math.round(featherScale * 100) / 100;
-    const key = JSON.stringify([width, height, fs, active.map((m) => [m.points, m.invert, m.feather])]);
+    const key = JSON.stringify([width, height, fs, active.map((m) => [m.points, m.mode, m.feather])]);
     const cached = this.entries.get(owner);
     if (cached?.key === key) return cached.texture;
 
@@ -79,13 +83,14 @@ export class MaskCache {
     g.clearRect(0, 0, width, height);
     g.fillStyle = '#fff';
 
-    const positive = masks.filter((m) => !m.invert);
-    const negative = masks.filter((m) => m.invert);
-    if (positive.length === 0) {
+    // Startzustand: leer, wenn die erste Maske etwas hinzufügt; sonst alles sichtbar
+    if (masks[0]!.mode !== 'add') {
       g.filter = 'none';
       g.fillRect(0, 0, width, height);
     }
-    const fill = (m: Mask) => {
+    for (const m of masks) {
+      g.globalCompositeOperation =
+        m.mode === 'add' ? 'source-over' : m.mode === 'subtract' ? 'destination-out' : 'destination-in';
       const blur = m.feather * featherScale;
       g.filter = blur > 0.25 ? `blur(${(blur / 2).toFixed(2)}px)` : 'none';
       g.beginPath();
@@ -96,11 +101,7 @@ export class MaskCache {
       });
       g.closePath();
       g.fill();
-    };
-    g.globalCompositeOperation = 'source-over';
-    positive.forEach(fill);
-    g.globalCompositeOperation = 'destination-out';
-    negative.forEach(fill);
+    }
     g.restore();
   }
 

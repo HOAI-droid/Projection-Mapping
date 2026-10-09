@@ -2,7 +2,6 @@
 // Alle lesen den aktuellsten Stand aus conn.snapshot (wichtig bei Tastenwiederholung).
 
 import {
-  centroid,
   outputToSurface,
   rotateQuad,
   scaleQuad,
@@ -10,8 +9,17 @@ import {
   translateQuad,
 } from '../../../../shared/geometry.js';
 import { newId } from '../../../../shared/ids.js';
-import { createMask, createSurface, findMask, POINT_MAX, POINT_MIN } from '../../../../shared/state.js';
-import type { AppState, CornerIndex, Mask, Point, Quad, Surface } from '../../../../shared/types.js';
+import {
+  createMask,
+  createMaskLayer,
+  createSurface,
+  findMask,
+  findSurface,
+  POINT_MAX,
+  POINT_MIN,
+  surfacesOf,
+} from '../../../../shared/state.js';
+import type { AppState, CornerIndex, Mask, MaskLayer, Point, Quad, Surface } from '../../../../shared/types.js';
 import type { Connection } from '../connection';
 
 export interface Size {
@@ -23,14 +31,14 @@ const clamp = (v: number) => Math.min(POINT_MAX, Math.max(POINT_MIN, v));
 export const clampPoint = (p: Point): Point => ({ x: clamp(p.x), y: clamp(p.y) });
 
 export function selectedSurface(state: AppState): Surface | null {
-  return state.project.surfaces.find((s) => s.id === state.view.selectedSurfaceId) ?? null;
+  return findSurface(state.project, state.view.selectedSurfaceId);
 }
 
-export function selectedMask(state: AppState): { mask: Mask; surface: Surface | null } | null {
+export function selectedMask(state: AppState): { mask: Mask; surface: Surface | null; layer: MaskLayer | null } | null {
   return state.view.selectedMaskId ? findMask(state.project, state.view.selectedMaskId) : null;
 }
 
-/** Maskenpunkte im Ausgaberaum (Flächenmasken folgen dem Corner Pin) */
+/** Maskenpunkte im Ausgaberaum (Flächenmasken folgen dem Corner Pin; Masken-Ebenen liegen schon dort) */
 export function maskPointsOut(mask: Mask, surface: Surface | null): Point[] {
   if (!surface) return mask.points;
   return mask.points.map((p) => surfaceToOutput(surface.corners, p) ?? p);
@@ -65,7 +73,7 @@ export function nudge(conn: Connection, out: Size, dx: number, dy: number, gestu
 
   if (v.tool === 'mask') {
     const sel = selectedMask(st);
-    if (!sel || v.selectedPoint === null) return;
+    if (!sel || v.selectedPoint === null || sel.layer?.locked) return;
     const pts = maskPointsOut(sel.mask, sel.surface);
     const p = pts[v.selectedPoint];
     if (!p) return;
@@ -112,7 +120,7 @@ export function clampQuad(q: Quad): Quad {
 export function addSurface(conn: Connection): void {
   const st = conn.snapshot.state;
   if (!st) return;
-  const n = st.project.surfaces.length;
+  const n = surfacesOf(st.project).length;
   // Neue Fläche leicht versetzt, damit sie nicht exakt über der letzten liegt
   const off = (n % 5) * 0.04;
   const corners: Quad = [
@@ -122,7 +130,7 @@ export function addSurface(conn: Connection): void {
     { x: 0.3 + off, y: 0.75 + off },
   ];
   const surface = createSurface(newId(), `Fläche ${n + 1}`, corners);
-  conn.op({ kind: 'addSurface', surface, index: n });
+  conn.op({ kind: 'addLayer', layer: surface, index: st.project.layers.length });
   conn.op({
     kind: 'setView',
     patch: { selectedSurfaceId: surface.id, selectedCorner: null, selectedMaskId: null, selectedPoint: null, tool: 'surface' },
@@ -132,8 +140,8 @@ export function addSurface(conn: Connection): void {
 export function duplicateSurface(conn: Connection, surfaceId: string): void {
   const st = conn.snapshot.state;
   if (!st) return;
-  const idx = st.project.surfaces.findIndex((s) => s.id === surfaceId);
-  const src = st.project.surfaces[idx];
+  const idx = st.project.layers.findIndex((l) => l.id === surfaceId);
+  const src = findSurface(st.project, surfaceId);
   if (!src) return;
   const copy: Surface = {
     ...structuredClone(src),
@@ -143,14 +151,15 @@ export function duplicateSurface(conn: Connection, surfaceId: string): void {
     corners: clampQuad(translateQuad(src.corners, 0.03, 0.03)),
     masks: src.masks.map((m) => ({ ...structuredClone(m), id: newId() })),
   };
-  conn.op({ kind: 'addSurface', surface: copy, index: idx + 1 });
+  conn.op({ kind: 'addLayer', layer: copy, index: idx + 1 });
   conn.op({ kind: 'setView', patch: { selectedSurfaceId: copy.id, selectedCorner: null } });
 }
 
-export function removeSurface(conn: Connection, surfaceId: string): void {
-  conn.op({ kind: 'removeSurface', surfaceId });
-  const st = conn.snapshot.state;
-  if (st?.view.selectedSurfaceId === surfaceId) {
+/** Fläche oder Masken-Ebene löschen */
+export function removeLayer(conn: Connection, layerId: string): void {
+  conn.op({ kind: 'removeLayer', layerId });
+  const v = conn.snapshot.state?.view;
+  if (v?.selectedSurfaceId === layerId || v?.selectedMaskId === layerId) {
     conn.op({ kind: 'setView', patch: { selectedSurfaceId: null, selectedCorner: null, selectedMaskId: null, selectedPoint: null } });
   }
 }
@@ -159,9 +168,9 @@ export function selectSurface(conn: Connection, surfaceId: string | null, corner
   const st = conn.snapshot.state;
   if (!st) return;
   const v = st.view;
-  // Gewählte Flächenmaske gehört zu einer anderen Fläche → Maskenauswahl aufheben
+  // Gewählte Maske gehört nicht zu dieser Fläche → Maskenauswahl aufheben
   const sel = selectedMask(st);
-  const keepMask = sel && (sel.surface === null || sel.surface.id === surfaceId);
+  const keepMask = !!sel && sel.surface?.id === surfaceId;
   if (v.selectedSurfaceId === surfaceId && v.selectedCorner === corner && (keepMask || !v.selectedMaskId)) return;
   conn.op({
     kind: 'setView',
@@ -173,25 +182,72 @@ export function selectSurface(conn: Connection, surfaceId: string | null, corner
   });
 }
 
-// --- Masken
-
-export function newMask(conn: Connection, global: boolean, firstPoint?: Point, gesture?: string): string | null {
+/** Maske (Flächenmaske oder Masken-Ebene) auswählen */
+export function selectMask(conn: Connection, maskId: string, point: number | null = null): void {
   const st = conn.snapshot.state;
-  if (!st) return null;
-  const surface = global ? null : selectedSurface(st);
-  if (!global && !surface) return null;
-  const count = (surface ? surface.masks.length : st.project.masks.length) + 1;
-  const mask = createMask(newId(), `${global ? 'Globale Maske' : 'Maske'} ${count}`);
-  if (firstPoint) {
-    const p = outToMask(firstPoint, surface);
-    if (p) mask.points = [p];
-  }
-  conn.op({ kind: 'addMask', surfaceId: surface?.id ?? null, mask }, gesture);
+  if (!st) return;
+  const found = findMask(st.project, maskId);
+  if (!found) return;
   conn.op({
     kind: 'setView',
-    patch: { tool: 'mask', selectedMaskId: mask.id, selectedPoint: firstPoint ? 0 : null },
+    patch: {
+      tool: 'mask',
+      selectedMaskId: maskId,
+      selectedPoint: point,
+      // Flächenmaske → zugehörige Fläche mit auswählen; Masken-Ebene → keine Fläche
+      selectedSurfaceId: found.surface?.id ?? null,
+      selectedCorner: null,
+    },
   });
-  return mask.id;
+}
+
+// --- Masken
+
+/**
+ * Neue Maske anlegen. scope 'surface' = in den Stapel der gewählten Fläche,
+ * 'layer' = Masken-Ebene ganz oben (wirkt auf alles darunter).
+ * points sind im Ausgaberaum.
+ */
+export function newMask(conn: Connection, scope: 'surface' | 'layer', points: Point[] = [], gesture?: string): string | null {
+  const st = conn.snapshot.state;
+  if (!st) return null;
+  const surface = scope === 'surface' ? selectedSurface(st) : null;
+  if (scope === 'surface' && !surface) return null;
+  const id = newId();
+  if (surface) {
+    const pts = points.map((p) => outToMask(p, surface)).filter((p): p is Point => p !== null);
+    // Erste Maske einer Fläche: „hinzufügen“ (nur Inneres zeigen); weitere: „ausschneiden“
+    const mode = surface.masks.length === 0 ? 'add' : 'subtract';
+    const mask = createMask(id, `Maske ${surface.masks.length + 1}`, pts, mode);
+    conn.op({ kind: 'addMask', surfaceId: surface.id, mask }, gesture);
+  } else {
+    const n = st.project.layers.filter((l) => l.kind === 'mask').length + 1;
+    const layer = createMaskLayer(id, `Masken-Ebene ${n}`, points.map(clampPoint));
+    conn.op({ kind: 'addLayer', layer, index: st.project.layers.length }, gesture);
+  }
+  conn.op({
+    kind: 'setView',
+    patch: {
+      tool: 'mask',
+      selectedMaskId: id,
+      selectedPoint: points.length ? points.length - 1 : null,
+      selectedSurfaceId: surface?.id ?? null,
+    },
+  });
+  return id;
+}
+
+/**
+ * Die Form einer Fläche aus allen Ebenen darunter ausschneiden:
+ * legt direkt unter der Fläche eine Masken-Ebene mit ihren Ecken an.
+ */
+export function cutoutBelow(conn: Connection, surfaceId: string): void {
+  const st = conn.snapshot.state;
+  const s = st && findSurface(st.project, surfaceId);
+  if (!st || !s) return;
+  const idx = st.project.layers.findIndex((l) => l.id === surfaceId);
+  const layer = createMaskLayer(newId(), `Ausschnitt „${s.name}“`.slice(0, 100), s.corners.map((p) => ({ ...p })));
+  conn.op({ kind: 'addLayer', layer, index: idx });
 }
 
 export function deleteSelectedPoint(conn: Connection): void {
@@ -199,14 +255,10 @@ export function deleteSelectedPoint(conn: Connection): void {
   if (!st) return;
   const sel = selectedMask(st);
   const i = st.view.selectedPoint;
-  if (!sel || i === null || !sel.mask.points[i]) return;
+  if (!sel || i === null || !sel.mask.points[i] || sel.layer?.locked) return;
   const points = sel.mask.points.filter((_, k) => k !== i);
   conn.op({ kind: 'setMaskPoints', maskId: sel.mask.id, points });
   conn.op({ kind: 'setView', patch: { selectedPoint: points.length ? Math.max(0, i - 1) : null } });
-}
-
-export function surfaceCentroid(s: Surface): Point {
-  return centroid(s.corners);
 }
 
 // --- Tastatur (Steuerung und Ausgabe)
@@ -259,7 +311,7 @@ export function handleEditorKey(e: KeyboardEvent, conn: Connection, out: Size): 
         const i = v.selectedPoint === null ? 0 : (v.selectedPoint + dir + n) % n;
         conn.op({ kind: 'setView', patch: { selectedPoint: i } });
       } else {
-        const s = selectedSurface(st) ?? st.project.surfaces[0];
+        const s = selectedSurface(st) ?? surfacesOf(st.project)[0];
         if (!s) return true;
         const i = v.selectedCorner === null ? 0 : (v.selectedCorner + dir + 4) % 4;
         selectSurface(conn, s.id, i as CornerIndex);
@@ -270,6 +322,13 @@ export function handleEditorKey(e: KeyboardEvent, conn: Connection, out: Size): 
     case 'Delete':
       if (v.tool === 'mask') {
         deleteSelectedPoint(conn);
+        return true;
+      }
+      return false;
+    case 'Enter':
+      // Maske fertig: Auswahl lösen, nächster Klick beginnt eine neue Maske
+      if (v.tool === 'mask' && v.selectedMaskId) {
+        conn.op({ kind: 'setView', patch: { selectedMaskId: null, selectedPoint: null } });
         return true;
       }
       return false;
@@ -297,7 +356,13 @@ export function handleEditorKey(e: KeyboardEvent, conn: Connection, out: Size): 
       return true;
     case 'g':
     case 'G':
-      conn.op({ kind: 'setView', patch: { testPattern: v.testPattern === 'grid' ? 'none' : 'grid' } });
+      // G: Raster auf den Flächen · ⇧G: Testgitter über das ganze Bild
+      if (e.shiftKey) conn.op({ kind: 'setView', patch: { testPattern: v.testPattern === 'grid' ? 'none' : 'grid' } });
+      else conn.op({ kind: 'setView', patch: { grid: { ...v.grid, enabled: !v.grid.enabled } } });
+      return true;
+    case 's':
+    case 'S':
+      conn.op({ kind: 'setView', patch: { snap: !v.snap } });
       return true;
     default:
       return false;

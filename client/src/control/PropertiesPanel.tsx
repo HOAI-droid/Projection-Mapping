@@ -1,9 +1,12 @@
 // Eigenschaften der gewählten Fläche: Inhalt, Darstellung, Transformation.
 
-import { defaultCorners, SPEED_MAX, SPEED_MIN, type SurfacePatch } from '../../../shared/state.js';
+import { EFFECTS, defaultParams } from '../../../shared/effects.js';
+import { defaultCorners, findMask, findSurface, SPEED_MAX, SPEED_MIN, type SurfacePatch } from '../../../shared/state.js';
 import type { BlendMode, Content, ContentType, FitMode, MediaItem, Surface } from '../../../shared/types.js';
 import { mediaUrl } from '../lib/connection';
-import { repeatGesture, rotateSelected, scaleSelected } from '../lib/editor/actions';
+import { cutoutBelow, repeatGesture, rotateSelected, scaleSelected } from '../lib/editor/actions';
+import { EffectPanel } from './EffectPanel';
+import { MaskProps } from './MasksPanel';
 import { RepeatButton } from './RepeatButton';
 import { conn, outputSize, useSnapshot } from './store';
 
@@ -13,6 +16,7 @@ const TYPES: { id: ContentType; label: string }[] = [
   { id: 'color', label: 'Farbe' },
   { id: 'image', label: 'Bild' },
   { id: 'video', label: 'Video' },
+  { id: 'effect', label: 'Effekt ✨' },
 ];
 
 const BLENDS: { id: BlendMode; label: string }[] = [
@@ -31,14 +35,25 @@ const FITS: { id: FitMode; label: string }[] = [
 export function PropertiesPanel() {
   const snap = useSnapshot();
   const { project, view } = snap.state!;
-  const s = project.surfaces.find((x) => x.id === view.selectedSurfaceId);
+  const s = findSurface(project, view.selectedSurfaceId);
   const out = outputSize(snap);
+
+  // Masken-Ebene gewählt → deren Einstellungen
+  const maskSel = view.selectedMaskId ? findMask(project, view.selectedMaskId) : null;
+  if (maskSel?.layer) {
+    return (
+      <section className="panel-section">
+        <h3>Masken-Ebene · {maskSel.layer.name}</h3>
+        <MaskProps mask={maskSel.layer} layer />
+      </section>
+    );
+  }
 
   if (!s) {
     return (
       <section className="panel-section">
         <h3>Eigenschaften</h3>
-        <p className="muted small">Fläche in der Liste oder auf der Bühne anklicken.</p>
+        <p className="muted small">Fläche oder Masken-Ebene in der Liste oder auf der Bühne anklicken.</p>
       </section>
     );
   }
@@ -66,6 +81,10 @@ export function PropertiesPanel() {
           ? setContent({ type: 'video', mediaId: first.id, loop: true, speed: 1, playing: true })
           : alert('Noch keine Videos – unten unter „Medien“ hochladen.');
       }
+      case 'effect': {
+        const first = EFFECTS.find((e) => e.id === 'edgechase') ?? EFFECTS[0]!;
+        return setContent({ type: 'effect', effect: first.id, params: defaultParams(first) });
+      }
     }
   };
 
@@ -84,6 +103,8 @@ export function PropertiesPanel() {
           ))}
         </select>
       </label>
+
+      {c.type === 'effect' && <EffectPanel surface={s} content={c} />}
 
       {c.type === 'color' && (
         <label className="field">
@@ -203,6 +224,20 @@ export function PropertiesPanel() {
           </button>
         </div>
         <CornerReadout s={s} out={out} />
+      </div>
+
+      <div className="field">
+        <span>Ausschneiden</span>
+        <button
+          onClick={() => cutoutBelow(conn, s.id)}
+          title="Legt direkt unter dieser Fläche eine Masken-Ebene mit ihrer Form an"
+        >
+          ✂ Form aus Ebenen darunter ausschneiden
+        </button>
+        <span className="muted small">
+          Praktisch, wenn diese Fläche halbtransparent ist oder nur Licht zeigt: Darunterliegende Flächen scheinen dann
+          nicht durch.
+        </span>
       </div>
     </section>
   );

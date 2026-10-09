@@ -75,9 +75,6 @@
   stroke-dasharray: none;
   fill: rgba(232, 121, 249, 0.12);
 }
-.ed-mask.invert polygon {
-  fill: rgba(0, 0, 0, 0.35);
-}
 .ed-mask.disabled polygon,
 .ed-mask.disabled polyline {
   stroke: #6b7280;
@@ -94,4 +91,60 @@
   paint-order: stroke;
   stroke: #000;
   stroke-width: 3px;
+}
+/* Masken-Ebenen und Masken-Modi: Rot = ausschneiden, Grün = hinzufügen, Gelb = Schnittmenge */
+.ed-masklayer {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-dasharray: 8 5;
+  pointer-events: none;
+}
+.ed-masklayer.subtract {
+  stroke: #f87171;
+}
+.ed-masklayer.intersect {
+  stroke: #facc15;
+}
+.ed-masklayer.disabled {
+  stroke: #6b7280;
+}
+.ed-mask.add polygon,
+.ed-mask.add polyline {
+  stroke: #4ade80;
+}
+.ed-mask.subtract polygon,
+.ed-mask.subtract polyline {
+  stroke: #f87171;
+}
+.ed-mask.intersect polygon,
+.ed-mask.intersect polyline {
+  stroke: #facc15;
+}
+.ed-mask.active.add polygon {
+  fill: rgba(74, 222, 128, 0.12);
+}
+.ed-mask.active.subtract polygon {
+  fill: rgba(248, 113, 113, 0.15);
+}
+.ed-mask.active.intersect polygon {
+  fill: rgba(250, 204, 21, 0.12);
+}
+.ed-mask.layer polygon,
+.ed-mask.layer polyline {
+  stroke-width: 2;
+}
+.ed-draw {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+.ed-snap circle,
+.ed-snap line {
+  fill: none;
+  stroke: #facc15;
+  stroke-width: 2;
+}
+.ed-hint {
+  fill: #e5e7eb;
 }
