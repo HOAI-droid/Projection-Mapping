@@ -150,5 +150,5 @@ function LockButton({ layer }: { layer: Layer }) {
 function contentLabel(l: Layer): string {
   if (l.kind !== 'surface') return '';
   const t = l.content.type;
-  return ({ none: 'leer', testgrid: 'Gitter', color: 'Farbe', image: 'Bild', video: 'Video', effect: 'Effekt' } as Record<string, string>)[t] ?? t;
+  return ({ none: 'leer', testgrid: 'Gitter', color: 'Farbe', image: 'Bild', video: 'Video', effect: 'Effekt', camera: 'Kamera', milkdrop: 'Milkdrop' } as Record<string, string>)[t] ?? t;
 }

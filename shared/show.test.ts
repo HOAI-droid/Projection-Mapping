@@ -74,3 +74,16 @@ describe('Mesh in Operationen', () => {
     expect(parseOp({ kind: 'setModulation', surfaceId: 's1', param: 'speed', mod: { source: 'lautstärke' } })).toBeNull();
   });
 });
+
+describe('Milkdrop-Inhalt', () => {
+  it('prüft und begrenzt die Einstellungen', () => {
+    expect(
+      parseOp({ kind: 'setContent', surfaceId: 's1', content: { type: 'milkdrop', preset: 'Geiss - Artifact 01', blend: 99, cycle: -3 } }),
+    ).toEqual({
+      kind: 'setContent',
+      surfaceId: 's1',
+      content: { type: 'milkdrop', preset: 'Geiss - Artifact 01', blend: 20, cycle: 0, random: false },
+    });
+    expect(parseOp({ kind: 'setContent', surfaceId: 's1', content: { type: 'milkdrop', preset: '' } })).toBeNull();
+  });
+});

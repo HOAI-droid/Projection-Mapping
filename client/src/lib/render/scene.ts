@@ -22,6 +22,7 @@ import type {
 import { CameraPool } from './cameras';
 import { ImageCache } from './images';
 import { MaskCache } from './masks';
+import { MilkdropPool } from './milkdrop';
 import { hexToRgb, Renderer, type DrawItem, type SurfaceItem } from './renderer';
 import { createTestGridCanvas } from './testgrid';
 import { VideoPool } from './videos';
@@ -47,11 +48,15 @@ export class Scene {
   private images: ImageCache;
   private masks: MaskCache;
   private cameras: CameraPool;
+  private milkdrop: MilkdropPool;
   private grid: WebGLTexture;
   private lastProject: AppState['project'] | null = null;
   private meshCache = new Map<string, MeshCacheEntry>();
   /** geglättete Modulationswerte je Fläche/Regler */
   private modState = new Map<string, number>();
+  private now = 0;
+  private pxScale = 1;
+  private usedMilkdrop = new Set<string>();
   /** Flächen, deren Aussehen sich in der laufenden Überblendung ändert */
   private changed: { start: number; ids: Set<string> } | null = null;
 
@@ -61,6 +66,7 @@ export class Scene {
     this.images = new ImageCache(this.renderer);
     this.masks = new MaskCache(this.renderer);
     this.cameras = new CameraPool(this.renderer);
+    this.milkdrop = new MilkdropPool(this.renderer);
     this.grid = this.renderer.createTexture();
     this.renderer.upload(this.grid, createTestGridCanvas(), { mipmap: true });
   }
@@ -83,6 +89,8 @@ export class Scene {
       this.lastProject = project;
     }
     this.renderer.setAudio(audio);
+    this.milkdrop.beginFrame(audio);
+    this.now = now;
 
     // Gewichte der Überblendung
     const tr = show.transition;
@@ -107,12 +115,14 @@ export class Scene {
 
     // Pixel dieser Leinwand je Ausgabepixel (Vorschau ist kleiner als die Ausgabe)
     const pxScale = size.width / Math.max(1, ref.width);
+    this.pxScale = pxScale;
     const grid = view.grid;
     const gridColor = hexToRgb(grid.color);
 
     const items: DrawItem[] = [];
     const usedImages = new Set<string>();
     const usedCameras = new Set<string>();
+    this.usedMilkdrop = new Set<string>();
     const maskOwners = new Set<string>();
     const keep = new Set<string>();
 
@@ -138,12 +148,15 @@ export class Scene {
 
       const showGrid = grid.enabled && s.visible && (!grid.onlySelected || s.id === view.selectedSurfaceId);
       const changed = fading && this.changed?.ids.has(s.id);
-      const oldLook = changed ? tr!.from[s.id] : undefined;
+      let oldLook = changed ? tr!.from[s.id] : undefined;
+      // Milkdrop → Milkdrop: Butterchurn blendet die Presets selbst über
+      const milkToMilk = oldLook?.content.type === 'milkdrop' && s.content.type === 'milkdrop';
+      if (milkToMilk) oldLook = undefined;
       if (oldLook && wOld > 0) {
         const it = this.lookItem(base, oldLook, s.id, aspect, wOld, media, usedImages, usedCameras, audio, keep);
         if (it) items.push(it);
       }
-      const weight = !fading ? 1 : changed ? wNew : wSame;
+      const weight = !fading || milkToMilk ? 1 : changed ? wNew : wSame;
       const cur = this.lookItem(base, lookOf(s), s.id, aspect, weight, media, usedImages, usedCameras, audio, keep);
       if (cur) {
         if (showGrid) cur.grid = gridOf(grid, pxScale, gridColor);
@@ -155,6 +168,7 @@ export class Scene {
 
     this.images.retain(usedImages);
     this.cameras.retain(usedCameras);
+    this.milkdrop.retain(this.usedMilkdrop);
     this.masks.retain(maskOwners);
     this.renderer.retainFeedback(keep);
     this.renderer.draw(items, show.blackout ? 0 : show.master);
@@ -254,6 +268,14 @@ export class Scene {
           ? { ...item, source: 'texture', texture: tex.texture, fitScale: fitScale(look.fit, tex.width / tex.height, aspect) }
           : null;
       }
+      case 'milkdrop': {
+        // Butterchurn-Auflösung: bis 720 Zeilen, in der kleineren Vorschau entsprechend weniger
+        const hh = Math.max(240, 720 * Math.min(1, this.pxScale));
+        const px = { w: base.aspect * hh, h: hh };
+        const r = this.milkdrop.texture(surfaceId, c, px, this.now, base.seed);
+        this.usedMilkdrop.add(r.key);
+        return r.texture ? { ...item, source: 'texture', texture: r.texture } : null;
+      }
       case 'camera': {
         usedCameras.add(c.deviceId);
         const tex = this.cameras.texture(c.deviceId);
@@ -301,6 +323,7 @@ export class Scene {
     this.images.dispose();
     this.masks.dispose();
     this.cameras.dispose();
+    this.milkdrop.disposeAll();
   }
 }
 

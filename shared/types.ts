@@ -46,6 +46,19 @@ export interface EffectContent {
   mod?: Record<string, Modulation>;
 }
 
+/** Milkdrop-Preset (Butterchurn) – die originalen Winamp-Visualisierungen */
+export interface MilkdropContent {
+  type: 'milkdrop';
+  /** Name des Presets */
+  preset: string;
+  /** Überblendzeit beim Presetwechsel (Sekunden) */
+  blend: number;
+  /** automatisch weiterschalten nach … Sekunden (0 = aus) */
+  cycle: number;
+  /** beim Weiterschalten zufällig statt der Reihe nach */
+  random: boolean;
+}
+
 export interface CameraContent {
   type: 'camera';
   /** Geräte-ID der Kamera ('' = Standardkamera) */
@@ -61,7 +74,8 @@ export type Content =
   | { type: 'image'; mediaId: string }
   | VideoContent
   | EffectContent
-  | CameraContent;
+  | CameraContent
+  | MilkdropContent;
 
 export type ContentType = Content['type'];
 
@@ -307,4 +321,6 @@ export interface AudioFrame {
   peaks: number[];
   /** 128 Werte der Wellenform */
   wave: number[];
+  /** 1024 rohe Audio-Samples (0…255, Base64) – Futter für Milkdrop/Butterchurn */
+  pcm?: string;
 }

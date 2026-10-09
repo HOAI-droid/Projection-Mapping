@@ -1,6 +1,6 @@
 {
   "name": "projection-mapping",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Projection-Mapping-Web-App für den Heimgebrauch (macOS + Chrome)",
   "type": "module",
@@ -19,6 +19,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "butterchurn": "^2.6.7",
+    "butterchurn-presets": "^2.4.7",
     "express": "^5.3.0",
     "multer": "^2.4.0",
     "react": "^19.3.0",

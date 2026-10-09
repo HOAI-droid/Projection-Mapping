@@ -2,7 +2,7 @@
 
 Projection Mapping im Browser, für zu Hause und **komplett auf einem MacBook**. Auf dem Mac-Display steuerst du, der Beamer hängt als zweiter Bildschirm dran und zeigt die Ausgabe. Ecken und Masken setzt du mit Maus oder Trackpad, wahlweise auf der Vorschau oder **direkt auf der Projektion**. Alles läuft lokal, ohne Cloud und ohne Konten.
 
-> **Stand: v0.4.** Neu sind Szenen mit Überblendung, Playlist (nach Zeit oder im Takt), Blackout, Audio-Reaktivität (Player, Mikrofon/Eingang oder Browser-Tab), 10 Musik-Visualisierungen im Stil von Winamp und Milkdrop, die Kopplung jedes Reglers an Bass/Mitten/Höhen/Beat, Flächenformen Dreieck/Kreis, ein Verzerrungsgitter für gewölbte Objekte und Live-Kameras. Ältere Stände liegen auf den Branches `v0.2`, `v0.3` usw.
+> **Stand: v0.5.** Neu sind **395 originale Milkdrop-Visualisierungen** aus Winamp (über Butterchurn) als Inhalt jeder Fläche, mit Preset-Browser, Favoriten, Zufall und automatischem Wechsel, gesteuert von der Musik. Seit v0.4 gibt es Szenen, Playlist, Blackout, Audio-Reaktivität, eigene Musik-Effekte, Dreieck/Kreis/Mesh und Live-Kamera. Ältere Stände liegen auf den Branches `v0.2` … `v0.4`.
 
 ---
 
@@ -76,6 +76,17 @@ Rechts unter **Form**:
 - **◯ Kreis:** Kreis bzw. Ellipse innerhalb der vier Ecken, perspektivisch korrekt.
 - **△ Dreieck:** drei Ecken, Ecke 1 ist die Spitze.
 - **▦ Gitter (Mesh):** für **gewölbte Objekte** wie Säulen, Kugeln, Autos, Rundbögen. Das Gitter übernimmt die bisherige Form, das Bild springt also nicht. Danach die Gitterpunkte ziehen, bis das Raster (`G`) auf dem Objekt gerade aussieht. Die vier Ecken ziehen das ganze Gitter perspektivisch mit. Spalten/Zeilen lassen sich nachträglich ändern (bis 16×16), **Glätten** entfernt die Wölbung wieder. Pfeiltasten verschieben den gewählten Gitterpunkt pixelgenau.
+
+### Milkdrop – die Winamp-Visualisierungen 🌈
+
+Inhalt **„Milkdrop (Winamp)“** wählen. Es startet ein zufälliges Preset aus **395 Original-Presets** der Milkdrop-Community (Geiss, Flexi, Rovastar, Martin, Zylot …). Wiedergegeben werden sie mit [Butterchurn](https://github.com/jberg/butterchurn), der WebGL-Umsetzung von Milkdrop (MIT-Lizenz).
+
+- **Preset-Browser:** suchen (z. B. „geiss“), ◀ ▶ blättern, 🎲 Zufall, ☆ Favoriten (nur Favoriten anzeigen mit ★).
+- **Überblendung:** Beim Wechsel blendet Milkdrop weich von einem Preset ins nächste (Dauer einstellbar).
+- **Automatisch wechseln:** alle N Sekunden, der Reihe nach oder zufällig. Alle Fenster wechseln gleichzeitig.
+- Die Musik kommt aus dem Reiter **Audio** (Player, Eingang oder Browser-Tab). Ohne Musik bewegen sich die Presets ruhig weiter.
+- Milkdrop funktioniert auf **jeder Form** (Viereck, Kreis, Dreieck, Mesh), mit Masken, Deckkraft, Mischmodi und in **Szenen**. Ein Szenenwechsel von Milkdrop zu Milkdrop blendet die Presets direkt ineinander.
+- Leistung: Jede Milkdrop-Fläche ist eine eigene Butterchurn-Instanz. Ab der 7. Fläche teilen sich Flächen mit gleichem Preset eine Instanz, weil der Browser nur begrenzt viele Grafik-Kontexte erlaubt.
 
 ### Live-Kamera 📷
 

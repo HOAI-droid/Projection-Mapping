@@ -40,6 +40,8 @@ export class AudioEngine {
   private timer: number | undefined;
   private freq = new Uint8Array(0);
   private time = new Float32Array(0);
+  private timeBytes = new Uint8Array(0);
+  private pcm = new Uint8Array(1024);
 
   // Analyse-Zustand
   private bandMax = { level: 0.2, bass: 0.2, mid: 0.2, high: 0.2 };
@@ -108,6 +110,7 @@ export class AudioEngine {
       this.analyser.maxDecibels = -15;
       this.freq = new Uint8Array(this.analyser.frequencyBinCount);
       this.time = new Float32Array(this.analyser.fftSize);
+      this.timeBytes = new Uint8Array(this.analyser.fftSize);
     }
     void this.ctx.resume();
     return this.ctx;
@@ -337,7 +340,16 @@ export class AudioEngine {
     const wave: number[] = [];
     for (let i = 0; i < WAVE; i++) wave.push(r3(Math.max(-1, Math.min(1, this.time[startIdx + i * step]! * 2.5 * gain))));
 
+    // Rohe Samples für Milkdrop (Butterchurn rechnet daraus seine eigene Analyse)
+    an.getByteTimeDomainData(this.timeBytes);
+    for (let i = 0; i < 1024; i++) {
+      this.pcm[i] = Math.max(0, Math.min(255, Math.round(128 + (this.timeBytes[i]! - 128) * gain)));
+    }
+    let bin = '';
+    for (let i = 0; i < 1024; i++) bin += String.fromCharCode(this.pcm[i]!);
+
     this.emitFrame({
+      pcm: btoa(bin),
       level: r3(level),
       bass: r3(bass),
       mid: r3(mid),

@@ -11,6 +11,8 @@ export default defineConfig({
     outDir: resolve(import.meta.dirname, 'dist/client'),
     emptyOutDir: true,
     target: ['safari15', 'chrome90'],
+    // Milkdrop-Presets sind bewusst große, nachgeladene Pakete
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       input: {
         index: resolve(root, 'index.html'),

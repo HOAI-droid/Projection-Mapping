@@ -787,3 +787,38 @@ button.blackout.on {
   gap: 6px;
   margin-top: 4px;
 }
+
+/* --- v0.5: Milkdrop --- */
+.milkdrop-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.md-current {
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #3b0764, #0c4a6e);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.md-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px;
+}
+.md-list .list-row {
+  padding: 1px 6px;
+  font-size: 12px;
+}
+input.search {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+}

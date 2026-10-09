@@ -586,6 +586,16 @@ export function parseContent(v: unknown): Content | null {
       }
       return Object.keys(mod).length ? { type: 'effect', effect, params, mod } : { type: 'effect', effect, params };
     }
+    case 'milkdrop':
+      return typeof v.preset === 'string' && v.preset.length > 0
+        ? {
+            type: 'milkdrop',
+            preset: v.preset.slice(0, 300),
+            blend: finite(v.blend) ? clamp(v.blend, 0, 20) : 2,
+            cycle: finite(v.cycle) ? clamp(v.cycle, 0, 600) : 0,
+            random: v.random === true,
+          }
+        : null;
     case 'camera':
       return {
         type: 'camera',

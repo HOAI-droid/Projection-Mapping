@@ -7,6 +7,8 @@ import { mediaUrl } from '../lib/connection';
 import { cutoutBelow, repeatGesture, rotateSelected, scaleSelected } from '../lib/editor/actions';
 import { CameraSection } from './CameraSection';
 import { EffectPanel } from './EffectPanel';
+import { MilkdropPanel } from './MilkdropPanel';
+import { loadMilkdropPresets } from '../lib/render/milkdrop';
 import { ModToggle, ModulationEditor } from './ModulationEditor';
 import { ShapeSection } from './ShapeSection';
 import { MaskProps } from './MasksPanel';
@@ -20,6 +22,7 @@ const TYPES: { id: ContentType; label: string }[] = [
   { id: 'image', label: 'Bild' },
   { id: 'video', label: 'Video' },
   { id: 'effect', label: 'Effekt ✨' },
+  { id: 'milkdrop', label: 'Milkdrop (Winamp) 🌈' },
   { id: 'camera', label: 'Live-Kamera 📷' },
 ];
 
@@ -91,6 +94,13 @@ export function PropertiesPanel() {
       }
       case 'camera':
         return setContent({ type: 'camera', deviceId: '', mirror: false });
+      case 'milkdrop':
+        // Presets laden, dann mit einem zufälligen beginnen
+        void loadMilkdropPresets().then(({ names }) => {
+          const preset = names[Math.floor(Math.random() * names.length)];
+          if (preset) setContent({ type: 'milkdrop', preset, blend: 2, cycle: 0, random: true });
+        });
+        return;
     }
   };
 
@@ -114,6 +124,7 @@ export function PropertiesPanel() {
 
       {c.type === 'effect' && <EffectPanel surface={s} content={c} />}
       {c.type === 'camera' && <CameraSection s={s} content={c} />}
+      {c.type === 'milkdrop' && <MilkdropPanel s={s} content={c} />}
 
       {c.type === 'color' && (
         <label className="field">
