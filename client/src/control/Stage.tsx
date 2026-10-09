@@ -47,7 +47,7 @@ export function Stage() {
     const frame = () => {
       id = requestAnimationFrame(frame);
       const { state, media } = conn.snapshot;
-      if (state) scene.render(state, media, outRef.current);
+      if (state) scene.render(state, media, outRef.current, conn.serverNow(), conn.currentAudio());
     };
     id = requestAnimationFrame(frame);
     return () => {

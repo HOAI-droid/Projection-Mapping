@@ -59,7 +59,7 @@ function OutputApp() {
       id = requestAnimationFrame(frame);
       const { state, media } = conn.snapshot;
       if (!state) return;
-      size = scene.render(state, media, { width: canvas.width || 1280, height: canvas.height || 720 });
+      size = scene.render(state, media, { width: canvas.width || 1280, height: canvas.height || 720 }, conn.serverNow(), conn.currentAudio());
 
       // Testbild nur bei Änderung neu zeichnen
       const pc = patternRef.current!;
@@ -156,7 +156,7 @@ function OutputApp() {
             </button>
           )}
           <span>
-            E Show · V Fläche · M Maske · S Snap · G Raster · Pfeile 1 px (⇧ 10 px) · ⌘Z Rückgängig
+            E Show · V Fläche · M Maske · S Snap · G Raster · 1–9 Szene · N nächste · B Blackout · ⌘Z
           </span>
         </div>
       )}

@@ -6,6 +6,7 @@ import {
   createMaskLayer,
   createProject,
   createSurface,
+  defaultShow,
   defaultView,
   findMask,
   parseOp,
@@ -15,7 +16,7 @@ import {
 import type { AppState, Surface } from './types.js';
 
 function initial(): AppState {
-  return { project: createProject('Test', 's1'), view: defaultView() };
+  return { project: createProject('Test', 's1'), view: defaultView(), show: defaultShow() };
 }
 const surface0 = (s: AppState) => s.project.layers[0] as Surface;
 
@@ -169,7 +170,8 @@ describe('parseProject / Migration', () => {
       masks: [{ id: 'g', name: 'G', points: [{ x: 0, y: 0 }], invert: false, feather: 5 }],
     };
     const p = parseProject(v2)!;
-    expect(p.format).toBe(3);
+    expect(p.format).toBe(4);
+    expect(p.scenes).toEqual([]);
     expect(p.layers.map((l) => [l.kind, l.id])).toEqual([
       ['surface', 'a'],
       ['mask', 'g'],

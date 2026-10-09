@@ -3,6 +3,7 @@
 // Fangradius auf Bühne und Beamer gleich anfühlt.
 
 import { distToSegment } from '../../../../shared/geometry.js';
+import { shapeOutline } from '../../../../shared/mesh.js';
 import type { AppState, Point } from '../../../../shared/types.js';
 import { maskPointsOut } from './actions';
 
@@ -37,7 +38,11 @@ export function snapTargets(state: AppState, exclude: { surfaceId?: string; mask
       continue;
     }
     if (!l.visible || l.id === exclude.surfaceId) continue;
-    poly([...l.corners]);
+    // Fangpunkte: die Griffe der Fläche; Kanten: ihr tatsächlicher Umriss (Kreis, Mesh …)
+    const handles = l.shape === 'triangle' ? l.corners.slice(0, 3) : l.shape === 'mesh' && l.mesh ? l.mesh.points : [...l.corners];
+    points.push(...handles);
+    const outline = shapeOutline(l);
+    outline.forEach((p, i) => segments.push([p, outline[(i + 1) % outline.length]!]));
     for (const m of l.masks) if (m.id !== exclude.maskId && m.enabled) poly(maskPointsOut(m, l));
   }
   return { points, segments };

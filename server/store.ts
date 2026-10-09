@@ -3,7 +3,7 @@
 import { readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { newId } from '../shared/ids.js';
-import { applyOp, createProject, defaultView, parseProject, touchesProject, type Op } from '../shared/state.js';
+import { applyOp, createProject, defaultShow, defaultView, parseProject, touchesProject, undoable, type Op } from '../shared/state.js';
 import type { AppState, Project, ProjectMeta, SessionMeta } from '../shared/types.js';
 import { config } from './config.js';
 import { readJson, writeJsonAtomic } from './fsutil.js';
@@ -28,7 +28,7 @@ export class StoreError extends Error {}
 const HISTORY_LIMIT = 200;
 
 export class Store {
-  state: AppState = { project: createProject('Neues Projekt', newId()), view: defaultView() };
+  state: AppState = { project: createProject('Neues Projekt', newId()), view: defaultView(), show: defaultShow() };
   private meta = { currentProjectId: null as string | null, dirty: false, projects: [] as ProjectMeta[] };
   private autosaveTimer: NodeJS.Timeout | null = null;
   // Rückgängig/Wiederherstellen: Projekt-Schnappschüsse (unveränderliche Objekte, daher billig)
@@ -46,7 +46,7 @@ export class Store {
       const raw = (await readJson(CURRENT_FILE())) as Partial<CurrentFile>;
       const project = parseProject(raw.project);
       if (project) {
-        this.state = { project, view: defaultView() };
+        this.state = { project, view: defaultView(), show: defaultShow() };
         this.meta.currentProjectId = typeof raw.currentProjectId === 'string' ? raw.currentProjectId : null;
         this.meta.dirty = raw.dirty === true;
       }
@@ -64,7 +64,7 @@ export class Store {
     this.state = next;
     if (touchesProject(op)) {
       // Neue Geste → neuer Rückgängig-Schritt; Folge-Ops derselben Geste werden zusammengefasst
-      if (!gesture || gesture !== this.lastGesture) {
+      if (undoable(op) && (!gesture || gesture !== this.lastGesture)) {
         this.undoStack.push(prev.project);
         if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
         this.redoStack = [];
@@ -128,14 +128,14 @@ export class Store {
     const file = await this.readProjectFile(id);
     // Ansichtseinstellungen (Bearbeiten, Snap, Raster) beibehalten, Auswahl zurücksetzen
     const { editMode, snap, grid } = this.state.view;
-    this.state = { project: file.project, view: { ...defaultView(), editMode, snap, grid } };
+    this.state = { project: file.project, view: { ...defaultView(), editMode, snap, grid }, show: defaultShow() };
     this.meta.currentProjectId = id;
     this.meta.dirty = false;
     await this.afterProjectChange();
   }
 
   async newProject(name: string): Promise<void> {
-    this.state = { project: createProject(cleanName(name), newId()), view: defaultView() };
+    this.state = { project: createProject(cleanName(name), newId()), view: defaultView(), show: defaultShow() };
     this.meta.currentProjectId = null;
     this.meta.dirty = true;
     await this.afterProjectChange();

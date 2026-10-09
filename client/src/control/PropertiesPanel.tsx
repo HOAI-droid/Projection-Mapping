@@ -5,7 +5,10 @@ import { defaultCorners, findMask, findSurface, SPEED_MAX, SPEED_MIN, type Surfa
 import type { BlendMode, Content, ContentType, FitMode, MediaItem, Surface } from '../../../shared/types.js';
 import { mediaUrl } from '../lib/connection';
 import { cutoutBelow, repeatGesture, rotateSelected, scaleSelected } from '../lib/editor/actions';
+import { CameraSection } from './CameraSection';
 import { EffectPanel } from './EffectPanel';
+import { ModToggle, ModulationEditor } from './ModulationEditor';
+import { ShapeSection } from './ShapeSection';
 import { MaskProps } from './MasksPanel';
 import { RepeatButton } from './RepeatButton';
 import { conn, outputSize, useSnapshot } from './store';
@@ -17,6 +20,7 @@ const TYPES: { id: ContentType; label: string }[] = [
   { id: 'image', label: 'Bild' },
   { id: 'video', label: 'Video' },
   { id: 'effect', label: 'Effekt ✨' },
+  { id: 'camera', label: 'Live-Kamera 📷' },
 ];
 
 const BLENDS: { id: BlendMode; label: string }[] = [
@@ -73,18 +77,20 @@ export function PropertiesPanel() {
         return setContent({ type: 'color', color: '#ffffff' });
       case 'image': {
         const first = ready('image')[0];
-        return first ? setContent({ type: 'image', mediaId: first.id }) : alert('Noch keine Bilder – unten unter „Medien“ hochladen.');
+        return first ? setContent({ type: 'image', mediaId: first.id }) : alert('Noch keine Bilder – im Tab „Medien“ hochladen.');
       }
       case 'video': {
         const first = ready('video')[0];
         return first
           ? setContent({ type: 'video', mediaId: first.id, loop: true, speed: 1, playing: true })
-          : alert('Noch keine Videos – unten unter „Medien“ hochladen.');
+          : alert('Noch keine Videos – im Tab „Medien“ hochladen.');
       }
       case 'effect': {
         const first = EFFECTS.find((e) => e.id === 'edgechase') ?? EFFECTS[0]!;
         return setContent({ type: 'effect', effect: first.id, params: defaultParams(first) });
       }
+      case 'camera':
+        return setContent({ type: 'camera', deviceId: '', mirror: false });
     }
   };
 
@@ -92,6 +98,8 @@ export function PropertiesPanel() {
   return (
     <section className="panel-section">
       <h3>Eigenschaften · {s.name}</h3>
+
+      <ShapeSection s={s} />
 
       <label className="field">
         <span>Inhalt</span>
@@ -105,6 +113,7 @@ export function PropertiesPanel() {
       </label>
 
       {c.type === 'effect' && <EffectPanel surface={s} content={c} />}
+      {c.type === 'camera' && <CameraSection s={s} content={c} />}
 
       {c.type === 'color' && (
         <label className="field">
@@ -163,7 +172,7 @@ export function PropertiesPanel() {
         </div>
       )}
 
-      {(c.type === 'image' || c.type === 'video') && (
+      {(c.type === 'image' || c.type === 'video' || c.type === 'camera') && (
         <div className="field">
           <span>Einpassung</span>
           <div className="segmented">
@@ -176,8 +185,11 @@ export function PropertiesPanel() {
         </div>
       )}
 
-      <label className="field">
-        <span>Deckkraft {Math.round(s.opacity * 100)} %</span>
+      <div className="field">
+        <span className="with-mod">
+          Deckkraft {Math.round(s.opacity * 100)} %
+          <ModToggle mod={s.opacityMod} onChange={(m) => update({ opacityMod: m })} />
+        </span>
         <input
           type="range"
           min={0}
@@ -186,7 +198,10 @@ export function PropertiesPanel() {
           value={s.opacity}
           onChange={(e) => update({ opacity: Number(e.target.value) }, repeatGesture(`opacity-${s.id}`, 800))}
         />
-      </label>
+        {s.opacityMod && (
+          <ModulationEditor mod={s.opacityMod} gestureKey={`${s.id}-opacity`} onChange={(m, g) => update({ opacityMod: m }, g)} />
+        )}
+      </div>
 
       <label className="field">
         <span>Mischmodus</span>

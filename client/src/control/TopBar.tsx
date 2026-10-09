@@ -63,6 +63,7 @@ export function TopBar({ onOpenProjects, toast }: Props) {
         </button>
       </div>
       <div className="spacer" />
+      <BlackoutButton />
       <span className={`pill ${server ? 'ok' : 'bad'}`}>{server ? 'Server' : 'Server getrennt'}</span>
       <span className={`pill ${outClass}`}>{outLabel}</span>
       {output?.videoBlocked && <span className="pill warn">Ausgabe einmal anklicken (Video blockiert)</span>}
@@ -76,5 +77,20 @@ export function TopBar({ onOpenProjects, toast }: Props) {
         Ausgabe öffnen
       </button>
     </header>
+  );
+}
+
+/** Not-Aus: Ausgabe sofort schwarz (Taste B) */
+function BlackoutButton() {
+  const snap = useSnapshot();
+  const on = snap.state?.show.blackout ?? false;
+  return (
+    <button
+      className={`blackout${on ? ' on' : ''}`}
+      onClick={() => conn.op({ kind: 'setShow', patch: { blackout: !on }, at: 0 })}
+      title="Ausgabe sofort schwarz / wieder an (Taste B)"
+    >
+      {on ? '● BLACKOUT AKTIV' : 'Blackout'} <kbd>B</kbd>
+    </button>
   );
 }

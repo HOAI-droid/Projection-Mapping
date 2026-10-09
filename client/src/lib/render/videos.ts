@@ -2,7 +2,7 @@
 // mehrere Flächen dasselbe Video zeigen.
 
 import { surfacesOf } from '../../../../shared/state.js';
-import type { Project, VideoContent } from '../../../../shared/types.js';
+import type { Look, Project, VideoContent } from '../../../../shared/types.js';
 import { mediaUrl } from '../connection';
 import type { Renderer } from './renderer';
 
@@ -32,9 +32,13 @@ export class VideoPool {
     document.body.appendChild(this.container);
   }
 
-  /** Gleicht Elemente mit dem Projekt ab: anlegen, Einstellungen übernehmen, entfernen. */
-  sync(project: Project): void {
+  /**
+   * Gleicht Elemente mit dem Projekt ab: anlegen, Einstellungen übernehmen, entfernen.
+   * extra: Aussehen, das gerade ausgeblendet wird (Videos laufen bis zum Ende der Überblendung).
+   */
+  sync(project: Project, extra: Look[] = []): void {
     const wanted = new Map<string, VideoContent>();
+    for (const l of extra) if (l.content.type === 'video') wanted.set(l.content.mediaId, l.content);
     for (const s of surfacesOf(project)) {
       if (s.visible && s.content.type === 'video') wanted.set(s.content.mediaId, s.content);
     }

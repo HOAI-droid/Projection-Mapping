@@ -9,9 +9,10 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { centroid, distToSegment, pointInPolygon, translateQuad } from '../../../../shared/geometry.js';
+import { evalMesh, shapeOutline } from '../../../../shared/mesh.js';
 import { newId } from '../../../../shared/ids.js';
 import { surfacesOf, type Op } from '../../../../shared/state.js';
-import type { AppState, CornerIndex, Mask, MaskLayer, Point, Quad, Surface } from '../../../../shared/types.js';
+import type { AppState, CornerIndex, Mask, MaskLayer, Mesh, Point, Quad, Surface } from '../../../../shared/types.js';
 import { CORNER_COLORS, CORNER_LABELS } from '../colors';
 import type { Connection } from '../connection';
 import {
@@ -25,6 +26,7 @@ import {
   scaleSelected,
   selectedMask,
   selectMask,
+  selectMeshPoint,
   selectSurface,
   type Size,
 } from './actions';
@@ -46,6 +48,7 @@ interface Props {
 type Drag =
   | { kind: 'corner'; surfaceId: string; index: CornerIndex; origin: Point; start: Point; gesture: string; snap: SnapTargets }
   | { kind: 'move'; surfaceId: string; origin: Quad; start: Point; gesture: string; moved: boolean; snap: SnapTargets }
+  | { kind: 'meshPoint'; surfaceId: string; index: number; origin: Point; start: Point; gesture: string; snap: SnapTargets }
   | {
       kind: 'maskPoint';
       maskId: string;
@@ -156,13 +159,32 @@ export function Editor({ state, conn, width: W, height: H, out, onOutput }: Prop
     const capture = () => e.currentTarget.setPointerCapture(e.pointerId);
 
     if (view.tool === 'surface') {
-      // 1. Ecken (gewählte Fläche zuerst, dann oberste zuerst)
+      // 0. Gitterpunkte des gewählten Meshs
+      const selMesh = visible.find((s) => s.id === view.selectedSurfaceId && s.shape === 'mesh' && s.mesh && !s.locked);
+      if (selMesh?.mesh) {
+        const i = selMesh.mesh.points.findIndex((q) => pxDist(q, p) <= HIT_POINT);
+        if (i >= 0) {
+          selectMeshPoint(conn, selMesh.id, i);
+          drag.current = {
+            kind: 'meshPoint',
+            surfaceId: selMesh.id,
+            index: i,
+            origin: selMesh.mesh.points[i]!,
+            start: p,
+            gesture: newId(),
+            snap: snapTargets(st, { surfaceId: selMesh.id }),
+          };
+          capture();
+          return;
+        }
+      }
+      // 1. Ecken (gewählte Fläche zuerst, dann oberste zuerst); Mesh-Ecken nur über Gitterpunkte
       const order = [...visible]
         .reverse()
         .sort((a, b) => Number(b.id === view.selectedSurfaceId) - Number(a.id === view.selectedSurfaceId));
       for (const s of order) {
-        if (s.locked) continue;
-        for (let i = 0; i < 4; i++) {
+        if (s.locked || s.shape === 'mesh') continue;
+        for (let i = 0; i < (s.shape === 'triangle' ? 3 : 4); i++) {
           const c = s.corners[i as CornerIndex];
           if (pxDist(c, p) <= HIT_CORNER) {
             selectSurface(conn, s.id, i as CornerIndex);
@@ -182,7 +204,7 @@ export function Editor({ state, conn, width: W, height: H, out, onOutput }: Prop
       }
       // 2. Innenfläche → verschieben (oberste zuerst)
       for (const s of [...visible].reverse()) {
-        if (pointInPolygon(p, s.corners)) {
+        if (pointInPolygon(p, shapeOutline(s))) {
           selectSurface(conn, s.id, null);
           if (!s.locked) {
             drag.current = {
@@ -300,6 +322,14 @@ export function Editor({ state, conn, width: W, height: H, out, onOutput }: Prop
         queue({ kind: 'setCorner', surfaceId: d.surfaceId, index: d.index, point: clampPoint(pt) }, d.gesture);
         break;
       }
+      case 'meshPoint': {
+        let pt: Point = { x: d.origin.x + dx, y: d.origin.y + dy };
+        let mark: Point | null = null;
+        if (useSnap) ({ point: pt, target: mark } = snapPoint(pt, d.snap, W, H));
+        setSnapMark(mark);
+        queue({ kind: 'setMeshPoint', surfaceId: d.surfaceId, index: d.index, point: clampPoint(pt) }, d.gesture);
+        break;
+      }
       case 'move': {
         // Kleine Zitterbewegungen beim Anklicken nicht als Verschieben werten
         if (!d.moved && Math.hypot(dx * W, dy * H) < 3) return;
@@ -408,13 +438,16 @@ export function Editor({ state, conn, width: W, height: H, out, onOutput }: Prop
       {surfaces.map((s, idx) => {
         if (!s.visible) return null;
         const active = s.id === view.selectedSurfaceId;
-        const [cx, cy] = toPx(centroid(s.corners));
+        const outline = shapeOutline(s);
+        const [cx, cy] = toPx(centroid(s.shape === 'triangle' ? s.corners.slice(0, 3) : s.corners));
         return (
           <g
             key={s.id}
             className={`ed-surface${active ? ' active' : ''}${s.locked ? ' locked' : ''}${view.tool === 'mask' ? ' dim' : ''}`}
           >
-            <polygon points={poly(s.corners)} />
+            <polygon points={poly(outline)} />
+            {/* Gitterlinien des Meshs zeigen die Wölbung */}
+            {active && s.shape === 'mesh' && s.mesh && view.tool === 'surface' && <MeshLines mesh={s.mesh} toPx={toPx} />}
             <text x={cx} y={cy} fontSize={font} className="ed-label">
               {idx + 1} · {s.name}
               {s.locked ? ' 🔒' : ''}
@@ -436,7 +469,24 @@ export function Editor({ state, conn, width: W, height: H, out, onOutput }: Prop
         visible.map((s) => {
           if (s.locked) return null;
           const active = s.id === view.selectedSurfaceId;
-          return s.corners.map((c, i) => {
+          if (s.shape === 'mesh') {
+            if (!active || !s.mesh) return null;
+            return s.mesh.points.map((q, i) => {
+              const [x, y] = toPx(q);
+              const r = view.selectedPoint === i ? 6 : 4;
+              return (
+                <rect
+                  key={`${s.id}-m${i}`}
+                  x={x - r}
+                  y={y - r}
+                  width={r * 2}
+                  height={r * 2}
+                  className={`ed-meshpt${view.selectedPoint === i ? ' sel' : ''}`}
+                />
+              );
+            });
+          }
+          return (s.shape === 'triangle' ? s.corners.slice(0, 3) : s.corners).map((c, i) => {
             const [x, y] = toPx(c);
             const isSel = active && view.selectedCorner === i;
             return (
@@ -461,6 +511,21 @@ export function Editor({ state, conn, width: W, height: H, out, onOutput }: Prop
           const [x, y] = toPx(selected.corners[view.selectedCorner]);
           return (
             <g className="ed-crosshair" stroke={CORNER_COLORS[view.selectedCorner]}>
+              <line x1={0} y1={y} x2={W} y2={y} />
+              <line x1={x} y1={0} x2={x} y2={H} />
+            </g>
+          );
+        })()}
+
+      {view.tool === 'surface' &&
+        selected?.shape === 'mesh' &&
+        selected.mesh &&
+        view.selectedPoint !== null &&
+        selected.mesh.points[view.selectedPoint] &&
+        (() => {
+          const [x, y] = toPx(selected.mesh!.points[view.selectedPoint!]!);
+          return (
+            <g className="ed-crosshair" stroke="#22d3ee">
               <line x1={0} y1={y} x2={W} y2={y} />
               <line x1={x} y1={0} x2={x} y2={H} />
             </g>
@@ -513,5 +578,28 @@ export function Editor({ state, conn, width: W, height: H, out, onOutput }: Prop
         </text>
       )}
     </svg>
+  );
+}
+
+/** Gitterlinien eines Meshs (fein abgetastet, damit die Wölbung sichtbar wird) */
+function MeshLines({ mesh, toPx }: { mesh: Mesh; toPx: (p: Point) => [number, number] }) {
+  const lines: string[] = [];
+  const n = 24;
+  for (let c = 0; c <= mesh.cols; c++) {
+    const pts: string[] = [];
+    for (let i = 0; i <= n; i++) pts.push(toPx(evalMesh(mesh, c / mesh.cols, i / n)).join(','));
+    lines.push(pts.join(' '));
+  }
+  for (let r = 0; r <= mesh.rows; r++) {
+    const pts: string[] = [];
+    for (let i = 0; i <= n; i++) pts.push(toPx(evalMesh(mesh, i / n, r / mesh.rows)).join(','));
+    lines.push(pts.join(' '));
+  }
+  return (
+    <g className="ed-meshlines">
+      {lines.map((l, i) => (
+        <polyline key={i} points={l} />
+      ))}
+    </g>
   );
 }

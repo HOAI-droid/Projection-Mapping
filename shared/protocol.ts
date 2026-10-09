@@ -1,7 +1,7 @@
 // WebSocket-Nachrichten zwischen Server und Clients.
 
 import type { Op } from './state.js';
-import type { AppState, MediaItem, Presence, SessionMeta } from './types.js';
+import type { AppState, AudioFrame, MediaItem, Presence, SessionMeta } from './types.js';
 
 export type Role = 'control' | 'output';
 
@@ -24,6 +24,8 @@ export type ClientMessage =
   | { t: 'redo' }
   | { t: 'outputStatus'; fps: number; width: number; height: number; videoBlocked: boolean }
   | ({ t: 'project' } & ProjectAction)
+  /** Analysewerte der Audio-Quelle – werden an alle anderen Fenster weitergereicht */
+  | { t: 'audio'; frame: AudioFrame }
   | { t: 'ping'; at: number };
 
 export type ServerMessage =
@@ -38,4 +40,6 @@ export type ServerMessage =
   | { t: 'session'; session: SessionMeta }
   | { t: 'presence'; presence: Presence }
   | { t: 'toast'; level: 'info' | 'error'; message: string }
-  | { t: 'pong'; at: number };
+  | { t: 'audio'; frame: AudioFrame }
+  /** server: Uhrzeit des Servers (für synchrone Überblendungen) */
+  | { t: 'pong'; at: number; server: number };

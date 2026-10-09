@@ -2,7 +2,7 @@
 
 Projection Mapping im Browser, für zu Hause und **komplett auf einem MacBook**. Auf dem Mac-Display steuerst du, der Beamer hängt als zweiter Bildschirm dran und zeigt die Ausgabe. Ecken und Masken setzt du mit Maus oder Trackpad, wahlweise auf der Vorschau oder **direkt auf der Projektion**. Alles läuft lokal, ohne Cloud und ohne Konten.
 
-> **Stand: v0.3.** Neu sind Masken auf Masken (Masken-Stapel pro Fläche mit Hinzufügen/Ausschneiden/Schnittmenge), Masken-Ebenen, die Flächen aus Flächen ausschneiden, Freihand-Zeichnen von Masken, Snap (abschaltbar), ein Raster mit einstellbarer Linienstärke zum Prüfen der Verzerrung und 31 Effekte (Feuer, Stroboskop, Discokugel, Lichtkegel, Kantenlauf, Lauflicht, Wasser, Fenster und mehr) mit Reglern. Ältere Stände liegen auf den Branches `v0.2` usw. Was noch kommt, steht in [SPEC.md](SPEC.md).
+> **Stand: v0.4.** Neu sind Szenen mit Überblendung, Playlist (nach Zeit oder im Takt), Blackout, Audio-Reaktivität (Player, Mikrofon/Eingang oder Browser-Tab), 10 Musik-Visualisierungen im Stil von Winamp und Milkdrop, die Kopplung jedes Reglers an Bass/Mitten/Höhen/Beat, Flächenformen Dreieck/Kreis, ein Verzerrungsgitter für gewölbte Objekte und Live-Kameras. Ältere Stände liegen auf den Branches `v0.2`, `v0.3` usw.
 
 ---
 
@@ -69,12 +69,25 @@ Gezogene Ecken und Maskenpunkte **rasten ein**: an Ecken anderer Flächen, an Ma
 
 **Leer, Testgitter, Farbe, Bild, Video oder Effekt.** Dazu kommen Deckkraft, Mischmodus (Normal, Additiv, Bildschirm, Multiplizieren) und bei Bild/Video die Einpassung (strecken, füllen, einpassen).
 
+### Flächenformen und Verzerrungsgitter
+
+Rechts unter **Form**:
+- **▭ Viereck:** Corner Pin mit vier Ecken (Standard).
+- **◯ Kreis:** Kreis bzw. Ellipse innerhalb der vier Ecken, perspektivisch korrekt.
+- **△ Dreieck:** drei Ecken, Ecke 1 ist die Spitze.
+- **▦ Gitter (Mesh):** für **gewölbte Objekte** wie Säulen, Kugeln, Autos, Rundbögen. Das Gitter übernimmt die bisherige Form, das Bild springt also nicht. Danach die Gitterpunkte ziehen, bis das Raster (`G`) auf dem Objekt gerade aussieht. Die vier Ecken ziehen das ganze Gitter perspektivisch mit. Spalten/Zeilen lassen sich nachträglich ändern (bis 16×16), **Glätten** entfernt die Wölbung wieder. Pfeiltasten verschieben den gewählten Gitterpunkt pixelgenau.
+
+### Live-Kamera 📷
+
+Inhalt **„Live-Kamera“** wählen. Das kann die MacBook-Kamera sein oder jede angeschlossene USB/HDMI-Kamera bzw. Capture-Karte. Optional spiegeln, die Einpassung wirkt wie bei Videos. Chrome fragt beim ersten Mal nach der Erlaubnis, auch im Ausgabefenster einmal „Zulassen“ klicken.
+
 ### Effekte ✨
 
 Inhalt **„Effekt“** wählen, dann eine Kategorie und einen Effekt. Alle Regler wirken sofort, ein Doppelklick auf einen Regler stellt den Standardwert her.
 
 | Kategorie | Effekte |
 | --- | --- |
+| **Musik ♪** | Spektrum-Analyzer (Winamp-Klassiker mit fallenden Spitzen), Oszilloskop, Kreis-Spektrum, **Milkdrop: Wellentunnel**, **Milkdrop: Farbwirbel**, Beat-Ringe, Spektrum-Wasserfall, Laser-Show, Bass-Puls, Pegel-Balken |
 | Licht | Stroboskop ⚠, Pulsieren, Lichtkegel (Moving Heads), Lichtwelle |
 | Disco & Party | Farb-Strobe ⚠, Discokugel, Disco-Spots, Equalizer, Konfetti |
 | Kontur | **Kantenlauf** (Licht fährt den Rand entlang), Lauflicht (Glühbirnen), Neon-Rahmen |
@@ -84,9 +97,35 @@ Inhalt **„Effekt“** wählen, dann eine Kategorie und einen Effekt. Alle Regl
 | Digital | Glitch, Matrix-Regen, Scanlines |
 | Architektur | Fenster (gehen nacheinander an), Sonnenlauf, Bauphasen, Aufbau/Wipe |
 
+Die Milkdrop-Effekte nutzen wie das Original eine **Rückkopplung**: Jedes Bild wird leicht gedreht, gezoomt und verblasst ins nächste übernommen, dazu kommen neue Formen aus der Musik. So entstehen die typischen Schlieren und Tunnel.
+Stroboskop, Farb-Strobe und Pulsieren haben die Einstellung **Takt: Beat der Musik**: Sie blitzen dann auf jeden Schlag.
+
 ⚠ Stroboskop-Effekte sind auf 12 Hz begrenzt. Blitzlicht kann bei fotosensiblen Menschen Anfälle auslösen.
 
 Eigene Effekte: In `shared/effects.ts` einen Eintrag mit GLSL-Funktion `vec4 effect(vec2 uv)` und Parameterliste ergänzen. Regler und Prüfung entstehen automatisch.
+
+### Audio-Reaktivität ♪ (Reiter „Audio“)
+
+**Quelle wählen:**
+- **🎵 Player:** Musikdateien (MP3, M4A, WAV …) hineinziehen. Sie laufen hörbar über den Mac und werden analysiert.
+- **🎙 Eingang:** Mikrofon oder Audio-Interface. Tipp für Spotify/Apple Music: das kostenlose virtuelle Audiogerät **BlackHole** installieren, im Mac als Ausgabe (bzw. Multi-Output mit den Lautsprechern) einstellen und hier als Eingang wählen. Dann reagiert die Projektion direkt auf den Mac-Ton.
+- **🌐 Browser-Tab:** Ton eines Chrome-Tabs (z. B. YouTube oder Spotify im Web). Im Dialog den Tab wählen und „Tab-Audio teilen“ einschalten.
+
+Die Analyse zeigt Spektrum, Pegel, Bass, Mitten, Höhen, Beat-LED und BPM. Mit **Verstärkung** gleichst du sehr leise Quellen aus, **Beat-Erkennung** steuert die Empfindlichkeit. **Tap** gibt den Takt von Hand vor, auch ganz ohne Musik.
+
+**Regler an die Musik koppeln:** Jeder Zahlen-Regler eines Effekts und die **Deckkraft** jeder Fläche haben einen **♪-Knopf**. Damit wählst du die Quelle (Pegel, Bass, Mitten, Höhen, Beat), die **Stärke** (auch negativ), die **Glättung** (träge oder zackig) und eine **Schwelle** (nur laute Stellen zählen).
+Beispiele: Feuer-Höhe ↔ Bass, Kantenlauf-Tempo ↔ Pegel, Deckkraft eines Videos ↔ Beat.
+
+Die Analyse läuft in der Steuerung und geht als kleine Zahlenpakete an Ausgabe und Vorschau. Das Steuerfenster muss also offen bleiben (es darf im Hintergrund sein).
+
+### Szenen, Playlist, Blackout (Reiter „Show“)
+
+- **Szene** = Aussehen aller Flächen: Inhalt, Effekt mit Reglern, Deckkraft, Mischmodus, Sichtbarkeit. Die Geometrie (Ecken, Masken) ist für alle Szenen gleich.
+- **„+ Szene speichern“** übernimmt den aktuellen Zustand. Dann umbauen und die nächste Szene speichern. ⟳ überschreibt eine Szene mit dem aktuellen Zustand, ein Doppelklick benennt sie um.
+- **▶** bzw. Tasten **1–9** lösen eine Szene aus, **N** wechselt zur nächsten.
+- **Übergang:** Überblenden, Schwarzblende oder harter Schnitt, mit Dauer.
+- **Playlist:** Szenen nacheinander, nach ihrer **Dauer** oder **im Takt** (z. B. alle 16 Beats). Mit Schleife.
+- **Blackout** (oben rechts, Taste **B**): Ausgabe sofort schwarz und mit dem nächsten Druck wieder an. Der Master-Regler dimmt alles.
 
 ### Masken (Werkzeug „Maske“, Taste `M`)
 
@@ -125,6 +164,8 @@ Die Masken werden von oben nach unten verrechnet, so entstehen **Masken auf Mask
 | `Esc` | Auswahl aufheben |
 | `⌘Z`, `⇧⌘Z` | Rückgängig / Wiederherstellen |
 | `⌘S` | Projekt speichern |
+| `1`–`9`, `N` | Szene auslösen, nächste Szene |
+| `B` | Blackout an/aus |
 | Pinch, ⌥+Scrollen | Fläche skalieren / drehen |
 
 ## 6. Medien und Projekte

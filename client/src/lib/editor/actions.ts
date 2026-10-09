@@ -1,13 +1,8 @@
 // Bearbeitungsaktionen, die Editor, Tastatur und Seitenleiste gemeinsam nutzen.
 // Alle lesen den aktuellsten Stand aus conn.snapshot (wichtig bei Tastenwiederholung).
 
-import {
-  outputToSurface,
-  rotateQuad,
-  scaleQuad,
-  surfaceToOutput,
-  translateQuad,
-} from '../../../../shared/geometry.js';
+import { rotateQuad, scaleQuad, translateQuad } from '../../../../shared/geometry.js';
+import { outputToShape, shapeToOutput } from '../../../../shared/mesh.js';
 import { newId } from '../../../../shared/ids.js';
 import {
   createMask,
@@ -41,13 +36,13 @@ export function selectedMask(state: AppState): { mask: Mask; surface: Surface | 
 /** Maskenpunkte im Ausgaberaum (Flächenmasken folgen dem Corner Pin; Masken-Ebenen liegen schon dort) */
 export function maskPointsOut(mask: Mask, surface: Surface | null): Point[] {
   if (!surface) return mask.points;
-  return mask.points.map((p) => surfaceToOutput(surface.corners, p) ?? p);
+  return mask.points.map((p) => shapeToOutput(surface, p) ?? p);
 }
 
 /** Ausgaberaum → Maskenraum */
 export function outToMask(p: Point, surface: Surface | null): Point | null {
   if (!surface) return clampPoint(p);
-  const uv = outputToSurface(surface.corners, p);
+  const uv = outputToShape(surface, p);
   return uv ? clampPoint(uv) : null;
 }
 
@@ -87,6 +82,15 @@ export function nudge(conn: Connection, out: Size, dx: number, dy: number, gestu
 
   const s = selectedSurface(st);
   if (!s || s.locked) return;
+  // Mesh: gewählter Gitterpunkt (selectedPoint im Flächen-Werkzeug)
+  if (s.shape === 'mesh' && s.mesh && v.selectedPoint !== null && s.mesh.points[v.selectedPoint]) {
+    const c = s.mesh.points[v.selectedPoint]!;
+    conn.op(
+      { kind: 'setMeshPoint', surfaceId: s.id, index: v.selectedPoint, point: clampPoint({ x: c.x + ox, y: c.y + oy }) },
+      gesture,
+    );
+    return;
+  }
   if (v.selectedCorner !== null) {
     const c = s.corners[v.selectedCorner];
     conn.op(
@@ -178,7 +182,17 @@ export function selectSurface(conn: Connection, surfaceId: string | null, corner
       selectedSurfaceId: surfaceId,
       selectedCorner: corner,
       ...(keepMask ? {} : { selectedMaskId: null, selectedPoint: null }),
+      // Im Flächen-Werkzeug steht selectedPoint für einen Mesh-Punkt
+      ...(v.tool === 'surface' ? { selectedPoint: null } : {}),
     },
+  });
+}
+
+/** Mesh-Punkt auswählen (Flächen-Werkzeug) */
+export function selectMeshPoint(conn: Connection, surfaceId: string, index: number): void {
+  conn.op({
+    kind: 'setView',
+    patch: { selectedSurfaceId: surfaceId, selectedCorner: null, selectedPoint: index, selectedMaskId: null },
   });
 }
 
@@ -313,7 +327,8 @@ export function handleEditorKey(e: KeyboardEvent, conn: Connection, out: Size): 
       } else {
         const s = selectedSurface(st) ?? surfacesOf(st.project)[0];
         if (!s) return true;
-        const i = v.selectedCorner === null ? 0 : (v.selectedCorner + dir + 4) % 4;
+        const n = s.shape === 'triangle' ? 3 : 4;
+        const i = v.selectedCorner === null ? 0 : (v.selectedCorner + dir + n) % n;
         selectSurface(conn, s.id, i as CornerIndex);
       }
       return true;
@@ -364,7 +379,27 @@ export function handleEditorKey(e: KeyboardEvent, conn: Connection, out: Size): 
     case 'S':
       conn.op({ kind: 'setView', patch: { snap: !v.snap } });
       return true;
-    default:
+    case 'b':
+    case 'B':
+      conn.op({ kind: 'setShow', patch: { blackout: !st.show.blackout }, at: 0 });
+      return true;
+    case 'n':
+    case 'N': {
+      // Nächste Szene
+      const scenes = st.project.scenes;
+      if (!scenes.length) return true;
+      const i = scenes.findIndex((x) => x.id === st.show.activeSceneId);
+      conn.op({ kind: 'goScene', sceneId: scenes[(i + 1) % scenes.length]!.id, at: 0 });
+      return true;
+    }
+    default: {
+      // Ziffern 1–9: Szene auslösen
+      if (/^[1-9]$/.test(key)) {
+        const scene = st.project.scenes[Number(key) - 1];
+        if (scene) conn.op({ kind: 'goScene', sceneId: scene.id, at: 0 });
+        return !!scene;
+      }
       return false;
+    }
   }
 }

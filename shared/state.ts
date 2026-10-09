@@ -2,22 +2,33 @@
 // Server und Clients wenden dieselben Operationen mit demselben Reducer an.
 
 import { EFFECT_MAP, defaultParams } from './effects.js';
+import { apply, quadToQuad } from './homography.js';
+import { MESH_MAX, meshCornerIndices } from './mesh.js';
 import type {
   AppState,
+  AudioSource,
   BlendMode,
   Content,
   CornerIndex,
   EffectParams,
+  FadeKind,
   FitMode,
   GridSettings,
   Layer,
+  Look,
   Mask,
   MaskLayer,
   MaskMode,
   MaskScope,
+  Mesh,
+  Modulation,
   Point,
   Project,
   Quad,
+  Scene,
+  Shape,
+  ShowSettings,
+  ShowState,
   Surface,
   TestPattern,
   Tool,
@@ -26,7 +37,11 @@ import type {
 } from './types.js';
 
 export type VideoPatch = Partial<Pick<VideoContent, 'loop' | 'speed' | 'playing'>>;
-export type SurfacePatch = Partial<Pick<Surface, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'fit'>>;
+export type SurfacePatch = Partial<
+  Pick<Surface, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'fit' | 'shape' | 'opacityMod'>
+>;
+export type ScenePatch = Partial<Pick<Scene, 'name' | 'duration' | 'looks'>>;
+export type ShowPatch = Partial<Pick<ShowState, 'blackout' | 'master' | 'playing'>>;
 export type MaskPatch = Partial<Pick<MaskLayer, 'name' | 'mode' | 'feather' | 'enabled' | 'locked'>>;
 
 export type Op =
@@ -48,7 +63,20 @@ export type Op =
   | { kind: 'removeMask'; maskId: string }
   | { kind: 'updateMask'; maskId: string; patch: MaskPatch }
   | { kind: 'setMaskPoints'; maskId: string; points: Point[] }
-  | { kind: 'setView'; patch: Partial<ViewState> };
+  | { kind: 'setView'; patch: Partial<ViewState> }
+  /** Verzerrungsgitter setzen/entfernen (Form 'mesh') */
+  | { kind: 'setMesh'; surfaceId: string; mesh: Mesh | null }
+  | { kind: 'setMeshPoint'; surfaceId: string; index: number; point: Point }
+  /** Audio-Kopplung eines Effekt-Reglers (null = entfernen) */
+  | { kind: 'setModulation'; surfaceId: string; param: string; mod: Modulation | null }
+  | { kind: 'addScene'; scene: Scene; index: number }
+  | { kind: 'updateScene'; sceneId: string; patch: ScenePatch }
+  | { kind: 'removeScene'; sceneId: string }
+  | { kind: 'moveScene'; sceneId: string; index: number }
+  /** Szene auslösen. at (Server-Uhr) setzt der Server, damit alle Fenster synchron überblenden. */
+  | { kind: 'goScene'; sceneId: string; at: number; fade?: FadeKind }
+  | { kind: 'setShow'; patch: ShowPatch; at: number }
+  | { kind: 'setShowSettings'; patch: Partial<ShowSettings> };
 
 /** Eckpunkte dürfen etwas außerhalb des Bildes liegen (Fläche ragt aus dem Bild). */
 export const POINT_MIN = -1;
@@ -58,6 +86,10 @@ export const SPEED_MAX = 4;
 export const FEATHER_MAX = 200;
 export const MAX_MASK_POINTS = 2000;
 export const MAX_LAYERS = 300;
+export const MAX_SCENES = 200;
+export const AUDIO_SOURCES: readonly AudioSource[] = ['level', 'bass', 'mid', 'high', 'beat'];
+export const SHAPES: readonly Shape[] = ['quad', 'circle', 'triangle', 'mesh'];
+export const FADE_KINDS: readonly FadeKind[] = ['cross', 'black', 'cut'];
 
 export const BLEND_MODES: readonly BlendMode[] = ['normal', 'add', 'multiply', 'screen'];
 export const FIT_MODES: readonly FitMode[] = ['stretch', 'fill', 'fit'];
@@ -79,13 +111,44 @@ export function createSurface(id: string, name: string, corners: Quad = defaultC
     name,
     visible: true,
     locked: false,
+    shape: 'quad',
     corners,
+    mesh: null,
     content: { type: 'testgrid' },
     opacity: 1,
     blend: 'normal',
     fit: 'stretch',
     masks: [],
+    opacityMod: null,
   };
+}
+
+export function createModulation(source: AudioSource = 'bass'): Modulation {
+  return { source, amount: 0.5, smoothing: 0.3, threshold: 0 };
+}
+
+export function defaultShowSettings(): ShowSettings {
+  return { fadeDuration: 1.5, fadeKind: 'cross', loop: true, advance: 'time', beatsPerScene: 16 };
+}
+
+export function defaultShow(): ShowState {
+  return { activeSceneId: null, transition: null, blackout: false, master: 1, playing: false, sceneStartedAt: 0 };
+}
+
+/** Aktuelles Aussehen aller Flächen (für „Szene speichern“ und Überblendungen) */
+export function looksOf(project: Project): Record<string, Look> {
+  const out: Record<string, Look> = {};
+  for (const s of surfacesOf(project)) {
+    out[s.id] = {
+      content: s.content,
+      visible: s.visible,
+      opacity: s.opacity,
+      blend: s.blend,
+      fit: s.fit,
+      opacityMod: s.opacityMod,
+    };
+  }
+  return out;
 }
 
 export function createMask(id: string, name: string, points: Point[] = [], mode: MaskMode = 'add'): Mask {
@@ -97,7 +160,7 @@ export function createMaskLayer(id: string, name: string, points: Point[] = []):
 }
 
 export function createProject(name: string, surfaceId: string): Project {
-  return { format: 3, name, layers: [createSurface(surfaceId, 'Fläche 1')] };
+  return { format: 4, name, layers: [createSurface(surfaceId, 'Fläche 1')], scenes: [], show: defaultShowSettings() };
 }
 
 export function defaultGrid(): GridSettings {
@@ -121,7 +184,12 @@ export function defaultView(): ViewState {
 
 /** Ändert die Operation das (speicherbare) Projekt? */
 export function touchesProject(op: Op): boolean {
-  return op.kind !== 'setView';
+  return op.kind !== 'setView' && op.kind !== 'setShow';
+}
+
+/** Landet die Operation im Rückgängig-Verlauf? (Szenen auslösen ist Show, nicht Bearbeitung) */
+export function undoable(op: Op): boolean {
+  return touchesProject(op) && op.kind !== 'goScene';
 }
 
 // --- Zugriffshelfer
@@ -188,16 +256,111 @@ function moveIn<T>(list: readonly T[], from: number, to: number): T[] {
   return out;
 }
 
+/** Neue Ecken setzen; ein vorhandenes Mesh wird perspektivisch mitgeführt */
+function withCorners(s: Surface, corners: Quad): Surface {
+  if (s.shape !== 'mesh' || !s.mesh) return { ...s, corners };
+  const h = quadToQuad(s.corners, corners);
+  if (!h) return { ...s, corners };
+  const points = s.mesh.points.map((p) => clampPoint(apply(h, p)));
+  const mesh = { ...s.mesh, points };
+  return { ...s, mesh, corners: cornersOfMesh(mesh) };
+}
+
+function cornersOfMesh(m: Mesh): Quad {
+  return meshCornerIndices(m).map((i) => m.points[i]!) as Quad;
+}
+
+function clampPoint(p: Point): Point {
+  return { x: clamp(p.x, POINT_MIN, POINT_MAX), y: clamp(p.y, POINT_MIN, POINT_MAX) };
+}
+
 export function applyOp(state: AppState, op: Op): AppState {
   switch (op.kind) {
     case 'setCorner':
       return mapSurface(state, op.surfaceId, (s) => {
         const corners = [...s.corners] as Quad;
         corners[op.index] = op.point;
-        return { ...s, corners };
+        return withCorners(s, corners);
       });
     case 'setCorners':
-      return mapSurface(state, op.surfaceId, (s) => ({ ...s, corners: op.corners }));
+      return mapSurface(state, op.surfaceId, (s) => withCorners(s, op.corners));
+    case 'setMesh':
+      return mapSurface(state, op.surfaceId, (s) =>
+        op.mesh ? { ...s, mesh: op.mesh, corners: cornersOfMesh(op.mesh) } : { ...s, mesh: null },
+      );
+    case 'setMeshPoint':
+      return mapSurface(state, op.surfaceId, (s) => {
+        if (!s.mesh || !s.mesh.points[op.index]) return s;
+        const points = [...s.mesh.points];
+        points[op.index] = op.point;
+        const mesh = { ...s.mesh, points };
+        return { ...s, mesh, corners: cornersOfMesh(mesh) };
+      });
+    case 'setModulation':
+      return mapSurface(state, op.surfaceId, (s) => {
+        if (s.content.type !== 'effect') return s;
+        const mod = { ...(s.content.mod ?? {}) };
+        if (op.mod) mod[op.param] = op.mod;
+        else delete mod[op.param];
+        return { ...s, content: { ...s.content, mod } };
+      });
+    case 'addScene': {
+      const p = state.project;
+      if (p.scenes.length >= MAX_SCENES || p.scenes.some((x) => x.id === op.scene.id)) return state;
+      const scenes = [...p.scenes];
+      scenes.splice(Math.max(0, Math.min(scenes.length, op.index)), 0, op.scene);
+      return { ...state, project: { ...p, scenes } };
+    }
+    case 'updateScene': {
+      const p = state.project;
+      if (!p.scenes.some((x) => x.id === op.sceneId)) return state;
+      return {
+        ...state,
+        project: { ...p, scenes: p.scenes.map((x) => (x.id === op.sceneId ? { ...x, ...op.patch } : x)) },
+      };
+    }
+    case 'removeScene': {
+      const p = state.project;
+      if (!p.scenes.some((x) => x.id === op.sceneId)) return state;
+      const show = state.show.activeSceneId === op.sceneId ? { ...state.show, activeSceneId: null } : state.show;
+      return { ...state, show, project: { ...p, scenes: p.scenes.filter((x) => x.id !== op.sceneId) } };
+    }
+    case 'moveScene': {
+      const p = state.project;
+      const from = p.scenes.findIndex((x) => x.id === op.sceneId);
+      if (from < 0 || from === op.index) return state;
+      return { ...state, project: { ...p, scenes: moveIn(p.scenes, from, op.index) } };
+    }
+    case 'goScene': {
+      const p = state.project;
+      const scene = p.scenes.find((x) => x.id === op.sceneId);
+      if (!scene) return state;
+      const from = looksOf(p);
+      const layers = p.layers.map((l) => {
+        const look = l.kind === 'surface' ? scene.looks[l.id] : undefined;
+        return look && l.kind === 'surface' ? { ...l, ...look } : l;
+      });
+      const kind = op.fade ?? p.show.fadeKind;
+      const duration = Math.round(p.show.fadeDuration * 1000);
+      return {
+        ...state,
+        project: { ...p, layers },
+        show: {
+          ...state.show,
+          activeSceneId: scene.id,
+          sceneStartedAt: op.at,
+          transition: kind === 'cut' || duration <= 0 ? null : { from, start: op.at, duration, kind },
+        },
+      };
+    }
+    case 'setShow': {
+      const show = { ...state.show, ...op.patch };
+      // Playlist startet: Uhr der aktuellen Szene neu stellen
+      if (op.patch.playing && !state.show.playing) show.sceneStartedAt = op.at;
+      return { ...state, show };
+    }
+    case 'setShowSettings':
+      return { ...state, project: { ...state.project, show: { ...state.project.show, ...op.patch } } };
     case 'setContent':
       return mapSurface(state, op.surfaceId, (s) => ({ ...s, content: op.content }));
     case 'patchVideo':
@@ -366,6 +529,13 @@ function parseSurfacePatch(v: unknown): SurfacePatch | null {
   if (blend) patch.blend = blend;
   const fit = parseEnum(v.fit, FIT_MODES);
   if (fit) patch.fit = fit;
+  const shape = parseEnum(v.shape, SHAPES);
+  if (shape) patch.shape = shape;
+  if (v.opacityMod === null) patch.opacityMod = null;
+  else if (v.opacityMod !== undefined) {
+    const m = parseModulation(v.opacityMod);
+    if (m) patch.opacityMod = m;
+  }
   return patch;
 }
 
@@ -405,11 +575,99 @@ export function parseContent(v: unknown): Content | null {
     case 'effect': {
       const effect = typeof v.effect === 'string' ? v.effect : '';
       const params = parseEffectParams(effect, v.params, false);
-      return params ? { type: 'effect', effect, params } : null;
+      if (!params) return null;
+      const mod: Record<string, Modulation> = {};
+      const def = EFFECT_MAP.get(effect)!;
+      if (isObj(v.mod)) {
+        for (const p of def.params) {
+          const m = p.type === 'float' ? parseModulation(v.mod[p.id]) : null;
+          if (m) mod[p.id] = m;
+        }
+      }
+      return Object.keys(mod).length ? { type: 'effect', effect, params, mod } : { type: 'effect', effect, params };
     }
+    case 'camera':
+      return {
+        type: 'camera',
+        deviceId: typeof v.deviceId === 'string' ? v.deviceId.slice(0, 200) : '',
+        mirror: v.mirror === true,
+      };
     default:
       return null;
   }
+}
+
+export function parseModulation(v: unknown): Modulation | null {
+  if (!isObj(v)) return null;
+  const source = parseEnum(v.source, AUDIO_SOURCES);
+  if (!source) return null;
+  return {
+    source,
+    amount: finite(v.amount) ? clamp(v.amount, -1, 1) : 0.5,
+    smoothing: finite(v.smoothing) ? clamp(v.smoothing, 0, 0.99) : 0.3,
+    threshold: finite(v.threshold) ? clamp(v.threshold, 0, 0.95) : 0,
+  };
+}
+
+function parseMesh(v: unknown): Mesh | null {
+  if (!isObj(v) || !finite(v.cols) || !finite(v.rows)) return null;
+  const cols = Math.round(v.cols);
+  const rows = Math.round(v.rows);
+  if (cols < 1 || rows < 1 || cols > MESH_MAX || rows > MESH_MAX) return null;
+  const points = parsePoints(v.points);
+  if (!points || points.length !== (cols + 1) * (rows + 1)) return null;
+  return { cols, rows, points };
+}
+
+function parseLook(v: unknown): Look | null {
+  if (!isObj(v)) return null;
+  const content = parseContent(v.content);
+  if (!content) return null;
+  return {
+    content,
+    visible: v.visible !== false,
+    opacity: finite(v.opacity) ? clamp(v.opacity, 0, 1) : 1,
+    blend: parseEnum(v.blend, BLEND_MODES) ?? 'normal',
+    fit: parseEnum(v.fit, FIT_MODES) ?? 'stretch',
+    opacityMod: parseModulation(v.opacityMod),
+  };
+}
+
+function parseLooks(v: unknown): Record<string, Look> | null {
+  if (!isObj(v)) return null;
+  const out: Record<string, Look> = {};
+  for (const [id, raw] of Object.entries(v).slice(0, MAX_LAYERS)) {
+    const look = parseId(id) ? parseLook(raw) : null;
+    if (look) out[id] = look;
+  }
+  return out;
+}
+
+function parseScene(v: unknown): Scene | null {
+  if (!isObj(v)) return null;
+  const id = parseId(v.id);
+  const looks = parseLooks(v.looks);
+  if (!id || !looks) return null;
+  return {
+    id,
+    name: parseName(v.name, 'Szene'),
+    looks,
+    duration: finite(v.duration) ? clamp(v.duration, 0.5, 3600) : 10,
+  };
+}
+
+function parseShowSettings(v: unknown, partial: boolean): Partial<ShowSettings> {
+  const d = defaultShowSettings();
+  const src = isObj(v) ? v : {};
+  const out: Partial<ShowSettings> = partial ? {} : d;
+  if (finite(src.fadeDuration)) out.fadeDuration = clamp(src.fadeDuration, 0, 30);
+  const fk = parseEnum(src.fadeKind, FADE_KINDS);
+  if (fk) out.fadeKind = fk;
+  if (typeof src.loop === 'boolean') out.loop = src.loop;
+  const adv = parseEnum(src.advance, ['time', 'beats'] as const);
+  if (adv) out.advance = adv;
+  if (finite(src.beatsPerScene)) out.beatsPerScene = clamp(Math.round(src.beatsPerScene), 1, 512);
+  return out;
 }
 
 /** Liest eine Maske. Ältere Dateien kennen statt mode nur invert. */
@@ -450,13 +708,22 @@ export function parseSurface(v: unknown): Surface | null {
     name: parseName(v.name, 'Fläche'),
     visible: v.visible !== false,
     locked: v.locked === true,
-    corners,
+    ...shapeAndMesh(v, corners),
     content: parseContent(v.content) ?? { type: 'none' },
     opacity: finite(v.opacity) ? clamp(v.opacity, 0, 1) : 1,
     blend: parseEnum(v.blend, BLEND_MODES) ?? 'normal',
     fit: parseEnum(v.fit, FIT_MODES) ?? 'stretch',
     masks: parseMasks(v.masks),
+    opacityMod: parseModulation(v.opacityMod),
   };
+}
+
+/** Form + Mesh; ein Mesh ohne gültige Punkte fällt auf ein Viereck zurück */
+function shapeAndMesh(v: Obj, corners: Quad): { shape: Shape; corners: Quad; mesh: Mesh | null } {
+  const shape = parseEnum(v.shape, SHAPES) ?? 'quad';
+  if (shape !== 'mesh') return { shape, corners, mesh: null };
+  const mesh = parseMesh(v.mesh);
+  return mesh ? { shape, corners: cornersOfMesh(mesh), mesh } : { shape: 'quad', corners, mesh: null };
 }
 
 export function parseLayer(v: unknown): Layer | null {
@@ -587,6 +854,65 @@ export function parseOp(v: unknown): Op | null {
       const patch = parseViewPatch(v.patch);
       return patch ? { kind: 'setView', patch } : null;
     }
+    case 'setMesh': {
+      const surfaceId = parseId(v.surfaceId);
+      const mesh = v.mesh === null ? null : parseMesh(v.mesh);
+      return surfaceId && (mesh || v.mesh === null) ? { kind: 'setMesh', surfaceId, mesh } : null;
+    }
+    case 'setMeshPoint': {
+      const surfaceId = parseId(v.surfaceId);
+      const point = parsePoint(v.point);
+      return surfaceId && point && Number.isInteger(v.index) && (v.index as number) >= 0
+        ? { kind: 'setMeshPoint', surfaceId, index: v.index as number, point }
+        : null;
+    }
+    case 'setModulation': {
+      const surfaceId = parseId(v.surfaceId);
+      const param = typeof v.param === 'string' && /^[a-z0-9_]{1,32}$/i.test(v.param) ? v.param : null;
+      const mod = v.mod === null ? null : parseModulation(v.mod);
+      return surfaceId && param && (mod || v.mod === null) ? { kind: 'setModulation', surfaceId, param, mod } : null;
+    }
+    case 'addScene': {
+      const scene = parseScene(v.scene);
+      return scene && finite(v.index) ? { kind: 'addScene', scene, index: Math.round(v.index) } : null;
+    }
+    case 'updateScene': {
+      const sceneId = parseId(v.sceneId);
+      if (!sceneId || !isObj(v.patch)) return null;
+      const patch: ScenePatch = {};
+      if (typeof v.patch.name === 'string' && v.patch.name.trim()) patch.name = v.patch.name.trim().slice(0, 100);
+      if (finite(v.patch.duration)) patch.duration = clamp(v.patch.duration, 0.5, 3600);
+      if (v.patch.looks !== undefined) {
+        const looks = parseLooks(v.patch.looks);
+        if (looks) patch.looks = looks;
+      }
+      return { kind: 'updateScene', sceneId, patch };
+    }
+    case 'removeScene': {
+      const sceneId = parseId(v.sceneId);
+      return sceneId ? { kind: 'removeScene', sceneId } : null;
+    }
+    case 'moveScene': {
+      const sceneId = parseId(v.sceneId);
+      return sceneId && finite(v.index) ? { kind: 'moveScene', sceneId, index: Math.round(v.index) } : null;
+    }
+    case 'goScene': {
+      const sceneId = parseId(v.sceneId);
+      const fade = parseEnum(v.fade, FADE_KINDS);
+      if (!sceneId) return null;
+      const at = finite(v.at) ? v.at : 0;
+      return fade ? { kind: 'goScene', sceneId, at, fade } : { kind: 'goScene', sceneId, at };
+    }
+    case 'setShow': {
+      if (!isObj(v.patch)) return null;
+      const patch: ShowPatch = {};
+      if (typeof v.patch.blackout === 'boolean') patch.blackout = v.patch.blackout;
+      if (typeof v.patch.playing === 'boolean') patch.playing = v.patch.playing;
+      if (finite(v.patch.master)) patch.master = clamp(v.patch.master, 0, 1);
+      return { kind: 'setShow', patch, at: finite(v.at) ? v.at : 0 };
+    }
+    case 'setShowSettings':
+      return { kind: 'setShowSettings', patch: parseShowSettings(v.patch, true) };
     default:
       return null;
   }
@@ -610,5 +936,14 @@ export function parseProject(v: unknown): Project | null {
   } else {
     return null;
   }
-  return { format: 3, name: parseName(v.name, 'Unbenannt'), layers };
+  const scenes = Array.isArray(v.scenes)
+    ? v.scenes.map(parseScene).filter((x): x is Scene => x !== null).slice(0, MAX_SCENES)
+    : [];
+  return {
+    format: 4,
+    name: parseName(v.name, 'Unbenannt'),
+    layers,
+    scenes,
+    show: parseShowSettings(v.show, false) as ShowSettings,
+  };
 }

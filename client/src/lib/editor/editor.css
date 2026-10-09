@@ -148,3 +148,18 @@
 .ed-hint {
   fill: #e5e7eb;
 }
+/* Verzerrungsgitter */
+.ed-meshlines polyline {
+  fill: none;
+  stroke: rgba(34, 211, 238, 0.55);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.ed-meshpt {
+  fill: #0e7490;
+  stroke: #e0f2fe;
+  stroke-width: 1.5;
+}
+.ed-meshpt.sel {
+  fill: #22d3ee;
+}

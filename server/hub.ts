@@ -4,9 +4,10 @@ import type { Server as HttpServer } from 'node:http';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { newId } from '../shared/ids.js';
 import type { ClientMessage, Role, ServerMessage } from '../shared/protocol.js';
-import { parseOp } from '../shared/state.js';
+import { parseOp, type Op } from '../shared/state.js';
 import type { OutputInfo, Presence, SessionMeta } from '../shared/types.js';
 import type { MediaLibrary } from './media.js';
+import { ShowRunner } from './show.js';
 import { StoreError, type Store } from './store.js';
 
 interface Client {
@@ -21,12 +22,14 @@ interface Client {
 export class Hub {
   private clients = new Set<Client>();
   private wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
+  private show: ShowRunner;
 
   constructor(
     private store: Store,
     private media: MediaLibrary,
   ) {
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req.headers['user-agent'] ?? ''));
+    this.show = new ShowRunner(store, (op) => this.applyServerOp(op));
     // Tote Verbindungen (z. B. iPhone gesperrt) regelmäßig aufräumen
     setInterval(() => {
       for (const c of this.clients) {
@@ -52,6 +55,14 @@ export class Hub {
     for (const c of this.clients) {
       if (c.role && c.ws.readyState === WebSocket.OPEN && (!filter || filter(c))) c.ws.send(data);
     }
+  }
+
+  /** Vom Server selbst ausgelöste Operation (Playlist) anwenden und verteilen */
+  private applyServerOp(op: Op): void {
+    const before = sessionKey(this.store.session);
+    if (!this.store.apply(op)) return;
+    this.broadcast({ t: 'op', op });
+    if (sessionKey(this.store.session) !== before) this.broadcast({ t: 'session', session: this.store.session });
   }
 
   broadcastMedia(): void {
@@ -104,9 +115,20 @@ export class Hub {
   }
 
   private async onMessage(c: Client, data: RawData): Promise<void> {
+    const text = data.toString();
+    // Audio-Analysen kommen ~60× pro Sekunde: ungeprüft und unverändert weiterreichen
+    if (text.startsWith('{"t":"audio"')) {
+      if (!c.role) return;
+      for (const o of this.clients) {
+        if (o !== c && o.role && o.ws.readyState === WebSocket.OPEN && o.ws.bufferedAmount < 256 * 1024) o.ws.send(text);
+      }
+      const m = /"beatCount":(\d+)/.exec(text);
+      if (m) this.show.onBeatCount(Number(m[1]));
+      return;
+    }
     let msg: ClientMessage;
     try {
-      msg = JSON.parse(data.toString()) as ClientMessage;
+      msg = JSON.parse(text) as ClientMessage;
     } catch {
       return;
     }
@@ -129,7 +151,10 @@ export class Hub {
 
     switch (msg.t) {
       case 'op': {
-        const op = parseOp(msg.op);
+        let op = parseOp(msg.op);
+        // Show-Befehle bekommen die Server-Uhrzeit, damit alle Fenster gleichzeitig überblenden
+        if (op?.kind === 'goScene' || op?.kind === 'setShow') op = { ...op, at: Date.now() };
+        if (op?.kind === 'goScene') this.show.onSceneChange();
         const seq = typeof msg.seq === 'number' && Number.isInteger(msg.seq) ? msg.seq : undefined;
         const gesture = typeof msg.gesture === 'string' ? msg.gesture.slice(0, 64) : undefined;
         const before = sessionKey(this.store.session);
@@ -165,7 +190,7 @@ export class Hub {
         await this.onProject(c, msg);
         return;
       case 'ping':
-        this.send(c, { t: 'pong', at: msg.at });
+        this.send(c, { t: 'pong', at: msg.at, server: Date.now() });
         return;
     }
   }

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { EFFECT_CATEGORIES, EFFECT_MAP, EFFECTS, defaultParams, type EffectCategory } from '../../../shared/effects.js';
 import type { EffectContent, Surface } from '../../../shared/types.js';
 import { repeatGesture } from '../lib/editor/actions';
+import { ModToggle, ModulationEditor } from './ModulationEditor';
 import { conn } from './store';
 
 export function EffectPanel({ surface, content }: { surface: Surface; content: EffectContent }) {
@@ -39,14 +40,20 @@ export function EffectPanel({ surface, content }: { surface: Surface; content: E
             title={e.description}
           >
             <span className="effect-icon">{e.icon}</span>
-            <span>{e.name}</span>
+            <span>
+              {e.name}
+              {e.audio ? ' ♪' : ''}
+            </span>
           </button>
         ))}
       </div>
 
       {def && (
         <div className="props">
-          <div className="muted small">{def.description}</div>
+          <div className="muted small">
+            {def.description}
+            {def.audio && ' Reagiert auf die Musik (Audio-Quelle im Tab „Audio“ wählen).'}
+          </div>
           {def.warning && <div className="warning">⚠ {def.warning}</div>}
           {def.params.map((p) => {
             const v = content.params[p.id] ?? p.default;
@@ -72,11 +79,18 @@ export function EffectPanel({ surface, content }: { surface: Surface; content: E
                 </div>
               );
             }
+            const mod = content.mod?.[p.id];
             return (
-              <label key={p.id} className="field">
-                <span>
-                  {p.label} <b>{formatNum(Number(v), p.step)}</b>
-                  {p.unit ? ` ${p.unit}` : ''}
+              <div key={p.id} className="field">
+                <span className="with-mod">
+                  <span>
+                    {p.label} <b>{formatNum(Number(v), p.step)}</b>
+                    {p.unit ? ` ${p.unit}` : ''}
+                  </span>
+                  <ModToggle
+                    mod={mod}
+                    onChange={(m) => conn.op({ kind: 'setModulation', surfaceId: surface.id, param: p.id, mod: m })}
+                  />
                 </span>
                 <input
                   type="range"
@@ -88,7 +102,14 @@ export function EffectPanel({ surface, content }: { surface: Surface; content: E
                   onDoubleClick={() => setParam(p.id, p.default)}
                   title="Doppelklick: Standardwert"
                 />
-              </label>
+                {mod && (
+                  <ModulationEditor
+                    mod={mod}
+                    gestureKey={`${surface.id}-${p.id}`}
+                    onChange={(m, g) => conn.op({ kind: 'setModulation', surfaceId: surface.id, param: p.id, mod: m }, g)}
+                  />
+                )}
+              </div>
             );
           })}
           <button className="small-btn" onClick={() => choose(def.id)}>

@@ -7,6 +7,12 @@
 // uSeed (0…1, pro Fläche verschieden), die Hilfsfunktionen aus EFFECT_LIB und je
 // Parameter eine Uniform p_<id> (float; Farben als vec3; Auswahl als float-Index).
 //
+// Musik: uAudio = (Pegel, Bass, Mitten, Höhen), uBeat (Puls 1 → 0), uBeatCount, uBpm,
+// spectrum(x), peakAt(x) und waveAt(x) für x = 0…1 (Frequenz bzw. Zeit).
+//
+// Rückkopplung (feedback: true): Der Effekt zeichnet in einen eigenen Puffer und kann mit
+// prev(uv) das vorige Bild lesen – so entstehen die typischen Milkdrop-Schlieren und Tunnel.
+//
 // Neuen Effekt ergänzen: Eintrag in EFFECTS anlegen – Regler in der Steuerung,
 // Prüfung auf dem Server und Shader-Aufbau entstehen automatisch.
 
@@ -15,7 +21,16 @@ export type EffectParam =
   | { id: string; label: string; type: 'color'; default: string }
   | { id: string; label: string; type: 'select'; options: string[]; default: number };
 
-export type EffectCategory = 'Licht' | 'Disco & Party' | 'Kontur' | 'Natur' | 'Muster' | 'Farbe' | 'Digital' | 'Architektur';
+export type EffectCategory =
+  | 'Musik'
+  | 'Licht'
+  | 'Disco & Party'
+  | 'Kontur'
+  | 'Natur'
+  | 'Muster'
+  | 'Farbe'
+  | 'Digital'
+  | 'Architektur';
 
 export interface EffectDef {
   id: string;
@@ -25,11 +40,16 @@ export interface EffectDef {
   description: string;
   /** Hinweis, der in der Steuerung angezeigt wird (z. B. Fotosensibilität) */
   warning?: string;
+  /** reagiert von sich aus auf Musik */
+  audio?: boolean;
+  /** nutzt prev(uv): das vorige Bild (Milkdrop-artige Rückkopplung) */
+  feedback?: boolean;
   params: EffectParam[];
   glsl: string;
 }
 
 export const EFFECT_CATEGORIES: EffectCategory[] = [
+  'Musik',
   'Licht',
   'Disco & Party',
   'Kontur',
@@ -83,9 +103,300 @@ vec2 perimeter(vec2 uv) {
 }
 // Bildpunkt mit gleichem Maßstab in x und y (Höhe = 1)
 vec2 aspectUv(vec2 uv) { return vec2(uv.x * uAspect, uv.y); }
+// Musik: 64 Frequenzbänder (x = 0 tief … 1 hoch), fallende Spitzen und Wellenform (−1…1)
+float spectrum(float x) { return texture(uAudioTex, vec2((clamp(x, 0.0, 1.0) * 63.0 + 0.5) / 128.0, 0.5 / 3.0)).r; }
+float peakAt(float x) { return texture(uAudioTex, vec2((clamp(x, 0.0, 1.0) * 63.0 + 0.5) / 128.0, 1.5 / 3.0)).r; }
+float waveAt(float x) { return texture(uAudioTex, vec2((clamp(x, 0.0, 1.0) * 127.0 + 0.5) / 128.0, 2.5 / 3.0)).r * 2.0 - 1.0; }
 `;
 
+const SYNC: EffectParam = { id: 'sync', label: 'Takt', type: 'select', options: ['Frequenz', 'Beat der Musik'], default: 0 };
+
 export const EFFECTS: EffectDef[] = [
+  // ----------------------------------------------------------------- Musik
+  {
+    id: 'spectrum',
+    name: 'Spektrum-Analyzer',
+    category: 'Musik',
+    icon: '📶',
+    audio: true,
+    description: 'Der klassische Winamp-Analyzer: Frequenzbalken mit fallenden Spitzen.',
+    params: [
+      { id: 'bars', label: 'Balken', type: 'float', min: 8, max: 64, step: 1, default: 32 },
+      { id: 'gap', label: 'Abstand', type: 'float', min: 0, max: 0.7, step: 0.01, default: 0.2 },
+      { id: 'style', label: 'Farben', type: 'select', options: ['Winamp', 'Regenbogen', 'Einfarbig'], default: 0 },
+      { id: 'peaks', label: 'Spitzen', type: 'select', options: ['an', 'aus'], default: 0 },
+      { id: 'layout', label: 'Anordnung', type: 'select', options: ['unten', 'gespiegelt', 'oben'], default: 0 },
+      { id: 'color', label: 'Farbe', type: 'color', default: '#22d3ee' },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  float x = uv.x * p_bars;
+  float id = floor(x), fx = fract(x);
+  float inBar = step(p_gap * 0.5, fx) * step(fx, 1.0 - p_gap * 0.5);
+  float xs = (id + 0.5) / p_bars;
+  float v = spectrum(xs), pk = peakAt(xs);
+  float y = 1.0 - uv.y;
+  if (p_layout > 1.5) y = uv.y;
+  else if (p_layout > 0.5) y = abs(uv.y - 0.5) * 2.0;
+  float bar = step(y, v) * inBar;
+  if (p_style < 0.5) bar *= step(0.22, fract(y * 28.0)); // LED-Segmente
+  float cap = inBar * step(abs(y - pk - 0.012), 0.008) * step(p_peaks, 0.5) * step(0.02, pk);
+  vec3 c;
+  if (p_style < 0.5) c = mix(vec3(0.15, 0.85, 0.1), mix(vec3(0.95, 0.85, 0.1), vec3(0.95, 0.15, 0.1), smoothstep(0.65, 0.95, y)), smoothstep(0.3, 0.7, y));
+  else if (p_style < 1.5) c = hsv2rgb(vec3(xs * 0.85 + uTime * 0.05, 0.9, 1.0));
+  else c = p_color;
+  return vec4(mix(c, vec3(1.0), cap), max(bar, cap));
+}`,
+  },
+  {
+    id: 'scope',
+    name: 'Oszilloskop',
+    category: 'Musik',
+    icon: '〽',
+    audio: true,
+    description: 'Die Wellenform der Musik als leuchtende Linie – gerade, gespiegelt oder als Kreis.',
+    params: [
+      { id: 'mode', label: 'Form', type: 'select', options: ['Linie', 'Doppelt', 'Kreis'], default: 0 },
+      { id: 'amp', label: 'Ausschlag', type: 'float', min: 0.2, max: 3, step: 0.01, default: 1 },
+      { id: 'width', label: 'Linienbreite', type: 'float', min: 0.002, max: 0.05, step: 0.001, default: 0.008 },
+      { id: 'glow', label: 'Leuchten', type: 'float', min: 0, max: 0.15, step: 0.001, default: 0.04 },
+      { id: 'color', label: 'Farbe', type: 'color', default: '#4ade80' },
+      { id: 'rainbow', label: 'Bunt', type: 'float', min: 0, max: 1, step: 0.01, default: 0 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  float d;
+  float hueX = uv.x;
+  if (p_mode > 1.5) {
+    vec2 c = aspectUv(uv) - vec2(uAspect * 0.5, 0.5);
+    float a = atan(c.y, c.x) / TAU + 0.5;
+    float r = 0.28 + waveAt(a) * 0.12 * p_amp + uAudio.y * 0.04;
+    d = abs(length(c) - r);
+    hueX = a;
+  } else {
+    float w = waveAt(uv.x) * 0.35 * p_amp;
+    d = abs(uv.y - (0.5 - w));
+    if (p_mode > 0.5) d = min(abs(uv.y - (0.3 - w * 0.6)), abs(uv.y - (0.7 + w * 0.6)));
+  }
+  float core = 1.0 - smoothstep(p_width * 0.5, p_width, d);
+  float halo = exp(-max(d - p_width, 0.0) / max(p_glow, 1e-3) * 2.5) * step(1e-4, p_glow) * 0.7;
+  vec3 c = mix(p_color, hsv2rgb(vec3(hueX + uTime * 0.1, 0.85, 1.0)), p_rainbow);
+  return vec4(mix(c, vec3(1.0), core * 0.4), clamp(core + halo, 0.0, 1.0) * (0.5 + 0.5 * uAudio.x + 0.3));
+}`,
+  },
+  {
+    id: 'radial',
+    name: 'Kreis-Spektrum',
+    category: 'Musik',
+    icon: '🌀',
+    audio: true,
+    description: 'Frequenzbalken strahlen kreisförmig aus einer pulsierenden Mitte.',
+    params: [
+      { id: 'bars', label: 'Balken', type: 'float', min: 16, max: 128, step: 1, default: 72 },
+      { id: 'inner', label: 'Innenradius', type: 'float', min: 0.05, max: 0.4, step: 0.01, default: 0.17 },
+      { id: 'length', label: 'Länge', type: 'float', min: 0.05, max: 0.6, step: 0.01, default: 0.28 },
+      speed(0.3, 2),
+      { id: 'color', label: 'Farbe', type: 'color', default: '#a78bfa' },
+      { id: 'rainbow', label: 'Bunt', type: 'float', min: 0, max: 1, step: 0.01, default: 0.8 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  vec2 p = aspectUv(uv) - vec2(uAspect * 0.5, 0.5);
+  float r = length(p);
+  float a = fract(atan(p.y, p.x) / TAU + 0.5 + uTime * p_speed * 0.05);
+  float id = floor(a * p_bars);
+  float xs = abs((id + 0.5) / p_bars * 2.0 - 1.0);
+  float v = spectrum(xs);
+  float inner = p_inner * (1.0 + uAudio.y * 0.25);
+  float bar = step(inner, r) * step(r, inner + 0.005 + v * p_length) * step(0.2, fract(a * p_bars));
+  float ring = smoothstep(0.006, 0.0, abs(r - inner));
+  float core = smoothstep(inner, inner * 0.2, r) * uBeat * 0.7;
+  vec3 c = mix(p_color, hsv2rgb(vec3(xs * 0.7 + uTime * 0.05, 0.85, 1.0)), p_rainbow);
+  return vec4(c, clamp(bar + ring + core, 0.0, 1.0));
+}`,
+  },
+  {
+    id: 'milktunnel',
+    name: 'Milkdrop: Wellentunnel',
+    category: 'Musik',
+    icon: '🌌',
+    audio: true,
+    feedback: true,
+    description: 'Die Wellenform zieht farbige Schlieren in einen drehenden Tunnel – wie in Winamps Milkdrop.',
+    params: [
+      { id: 'zoom', label: 'Sog', type: 'float', min: 0, max: 1, step: 0.01, default: 0.5 },
+      { id: 'spin', label: 'Drehung', type: 'float', min: -1, max: 1, step: 0.01, default: 0.3 },
+      { id: 'decay', label: 'Nachleuchten', type: 'float', min: 0.8, max: 0.995, step: 0.001, default: 0.96 },
+      { id: 'amp', label: 'Ausschlag', type: 'float', min: 0.2, max: 3, step: 0.01, default: 1 },
+      { id: 'react', label: 'Reaktion', type: 'float', min: 0, max: 2, step: 0.01, default: 1 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  vec2 c = uv - 0.5;
+  c.x *= uAspect;
+  float zoom = 1.0 - 0.04 * p_zoom - uAudio.y * 0.035 * p_react;
+  float ang = 0.012 * p_spin + uAudio.z * 0.02 * p_react * sign(p_spin + 1e-4);
+  vec2 q = rot(ang) * c * zoom;
+  q.x /= uAspect;
+  vec3 col = prev(q + 0.5).rgb * p_decay;
+  float y = 0.5 + waveAt(uv.x) * 0.22 * p_amp;
+  float line = smoothstep(0.01, 0.0, abs(uv.y - y));
+  vec3 wc = hsv2rgb(vec3(uTime * 0.07 + uv.x * 0.4, 0.8, 1.0));
+  col = max(col - 0.003, 0.0) + wc * line * (0.5 + uAudio.x + uBeat * 0.5);
+  return vec4(col, 1.0);
+}`,
+  },
+  {
+    id: 'milkswirl',
+    name: 'Milkdrop: Farbwirbel',
+    category: 'Musik',
+    icon: '🍥',
+    audio: true,
+    feedback: true,
+    description: 'Wirbelnde Farbströme, die bei jedem Bass-Schlag neue Farbe bekommen.',
+    params: [
+      { id: 'swirl', label: 'Wirbel', type: 'float', min: -2, max: 2, step: 0.01, default: 1 },
+      { id: 'warp', label: 'Verwirbelung', type: 'float', min: 0, max: 3, step: 0.01, default: 1 },
+      { id: 'decay', label: 'Nachleuchten', type: 'float', min: 0.8, max: 0.995, step: 0.001, default: 0.975 },
+      { id: 'react', label: 'Reaktion', type: 'float', min: 0, max: 2, step: 0.01, default: 1 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  vec2 c = uv - 0.5;
+  c.x *= uAspect;
+  float r = length(c);
+  float a = 0.03 * p_swirl * (1.0 - min(r, 1.0)) + uAudio.y * 0.02 * p_react;
+  vec2 q = rot(a) * c * (0.988 - uBeat * 0.025 * p_react);
+  q.x /= uAspect;
+  q += (vec2(noise(uv * 4.0 + uTime * 0.3), noise(uv * 4.0 - uTime * 0.3 + 7.0)) - 0.5) * 0.006 * p_warp;
+  vec3 col = prev(q + 0.5).rgb * p_decay;
+  vec2 src = 0.18 * vec2(sin(uTime * 0.7), cos(uTime * 0.9)) * vec2(uAspect, 1.0);
+  float blob = smoothstep(0.06 + uAudio.y * 0.1, 0.0, length(c - src));
+  col += hsv2rgb(vec3(uTime * 0.05 + uBeatCount * 0.08, 0.9, 1.0)) * blob * (0.25 + uBeat * p_react);
+  return vec4(max(col - 0.002, 0.0), 1.0);
+}`,
+  },
+  {
+    id: 'beatrings',
+    name: 'Beat-Ringe',
+    category: 'Musik',
+    icon: '⭕',
+    audio: true,
+    feedback: true,
+    description: 'Jeder Beat schickt einen farbigen Ring nach außen.',
+    params: [
+      speed(1, 3),
+      { id: 'decay', label: 'Nachleuchten', type: 'float', min: 0.8, max: 0.99, step: 0.001, default: 0.95 },
+      { id: 'width', label: 'Ringbreite', type: 'float', min: 0.003, max: 0.05, step: 0.001, default: 0.012 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  vec2 c = uv - 0.5;
+  c.x *= uAspect;
+  vec2 q = c * (1.0 - 0.02 * p_speed);
+  q.x /= uAspect;
+  vec3 col = prev(q + 0.5).rgb * p_decay;
+  float r = length(c);
+  float ring = smoothstep(p_width, 0.0, abs(r - 0.06)) * smoothstep(0.35, 0.9, uBeat);
+  col += hsv2rgb(vec3(uBeatCount * 0.13, 0.85, 1.0)) * ring * 1.5;
+  col += hsv2rgb(vec3(uBeatCount * 0.13 + 0.5, 0.6, 1.0)) * smoothstep(0.05, 0.0, r) * uAudio.y * 0.4;
+  return vec4(max(col - 0.002, 0.0), 1.0);
+}`,
+  },
+  {
+    id: 'waterfall',
+    name: 'Spektrum-Wasserfall',
+    category: 'Musik',
+    icon: '🎚',
+    audio: true,
+    feedback: true,
+    description: 'Das Spektrum läuft als leuchtende Landschaft nach unten.',
+    params: [
+      speed(1, 4),
+      { id: 'palette', label: 'Farben', type: 'select', options: ['Glut', 'Eis', 'Regenbogen'], default: 0 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  float rowH = 0.004 * max(p_speed, 0.05);
+  if (uv.y > rowH) return vec4(prev(uv - vec2(0.0, rowH)).rgb * 0.995, 1.0);
+  float v = spectrum(uv.x);
+  vec3 c;
+  if (p_palette < 0.5) c = vec3(v * 1.5, v * v * 1.2, v * v * v * 0.8);
+  else if (p_palette < 1.5) c = vec3(v * v * 0.6, v * 1.1, v * 1.6);
+  else c = hsv2rgb(vec3(0.7 - v * 0.7, 0.9, v * 1.3));
+  return vec4(c, 1.0);
+}`,
+  },
+  {
+    id: 'laser',
+    name: 'Laser-Show',
+    category: 'Musik',
+    icon: '🔺',
+    audio: true,
+    description: 'Fächer aus Laserstrahlen, die zur Musik schwenken und auf den Beat aufblitzen.',
+    params: [
+      { id: 'count', label: 'Strahlen', type: 'float', min: 1, max: 12, step: 1, default: 7 },
+      { id: 'spread', label: 'Fächer', type: 'float', min: 0.1, max: 3, step: 0.01, default: 1.6 },
+      speed(1, 4),
+      { id: 'width', label: 'Breite', type: 'float', min: 0.001, max: 0.03, step: 0.001, default: 0.004 },
+      { id: 'color', label: 'Farbe', type: 'color', default: '#22ff55' },
+      { id: 'rainbow', label: 'Bunt', type: 'float', min: 0, max: 1, step: 0.01, default: 0.3 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  vec2 p = vec2((uv.x - 0.5) * uAspect, 1.0 - uv.y + 0.02);
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 12; i++) {
+    float fi = float(i);
+    if (fi >= p_count) break;
+    float base = p_count > 1.0 ? fi / (p_count - 1.0) - 0.5 : 0.0;
+    float ang = base * p_spread + sin(uTime * p_speed * 0.8 + fi * 0.7) * (0.15 + uAudio.z * 0.5);
+    vec2 dir = vec2(sin(ang), cos(ang));
+    float d = abs(dot(p, vec2(dir.y, -dir.x)));
+    float beam = smoothstep(p_width * 3.0, 0.0, d) * step(0.0, dot(p, dir));
+    vec3 c = mix(p_color, hsv2rgb(vec3(fi / p_count + uBeatCount * 0.1, 0.9, 1.0)), p_rainbow);
+    acc += c * (beam + smoothstep(p_width, 0.0, d) * step(0.0, dot(p, dir)));
+  }
+  acc *= 0.35 + 0.5 * uAudio.x + uBeat * 0.8;
+  float a = clamp(max(acc.r, max(acc.g, acc.b)), 0.0, 1.0);
+  return vec4(acc / max(a, 1e-4), a);
+}`,
+  },
+  {
+    id: 'basspulse',
+    name: 'Bass-Puls',
+    category: 'Musik',
+    icon: '🔊',
+    audio: true,
+    description: 'Die ganze Fläche leuchtet mit dem Bass und blitzt beim Beat – perfekt für Objekte.',
+    params: [
+      { id: 'color', label: 'Farbe', type: 'color', default: '#ff2a6d' },
+      { id: 'min', label: 'Grundhelligkeit', type: 'float', min: 0, max: 0.6, step: 0.01, default: 0.05 },
+      { id: 'curve', label: 'Härte', type: 'float', min: 0.5, max: 4, step: 0.01, default: 1.5 },
+      { id: 'flash', label: 'Beat-Blitz', type: 'float', min: 0, max: 1, step: 0.01, default: 0.5 },
+      { id: 'cycle', label: 'Farbwechsel auf Beat', type: 'float', min: 0, max: 1, step: 0.01, default: 0 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  float a = mix(p_min, 1.0, pow(uAudio.y, p_curve)) + uBeat * p_flash;
+  vec3 c = mix(p_color, hsv2rgb(vec3(hash11(uBeatCount * 3.1), 0.85, 1.0)), p_cycle);
+  return vec4(mix(c, vec3(1.0), uBeat * p_flash * 0.5), clamp(a, 0.0, 1.0));
+}`,
+  },
+  {
+    id: 'meters',
+    name: 'Pegel-Balken',
+    category: 'Musik',
+    icon: '🎛',
+    audio: true,
+    description: 'Vier LED-Balken für Pegel, Bass, Mitten und Höhen.',
+    params: [
+      { id: 'dir', label: 'Richtung', type: 'select', options: ['senkrecht', 'waagerecht'], default: 0 },
+      { id: 'segments', label: 'Segmente', type: 'float', min: 4, max: 40, step: 1, default: 16 },
+    ],
+    glsl: `vec4 effect(vec2 uv) {
+  vec2 p = p_dir > 0.5 ? vec2(uv.y, uv.x) : vec2(uv.x, 1.0 - uv.y);
+  float id = floor(p.x * 4.0);
+  float fx = fract(p.x * 4.0);
+  float v = id < 0.5 ? uAudio.x : id < 1.5 ? uAudio.y : id < 2.5 ? uAudio.z : uAudio.w;
+  float seg = floor(p.y * p_segments) / p_segments;
+  float on = step(seg, v - 0.001) * step(0.1, fx) * step(fx, 0.9) * step(0.15, fract(p.y * p_segments));
+  vec3 c = mix(vec3(0.15, 0.9, 0.2), mix(vec3(1.0, 0.85, 0.1), vec3(1.0, 0.15, 0.1), step(0.85, seg)), step(0.6, seg));
+  return vec4(c, mix(0.08, 1.0, on) * step(0.1, fx) * step(fx, 0.9) * step(0.15, fract(p.y * p_segments)));
+}`,
+  },
+
   // ---------------------------------------------------------------- Licht
   {
     id: 'strobe',
@@ -98,9 +409,12 @@ export const EFFECTS: EffectDef[] = [
       { id: 'freq', label: 'Frequenz', type: 'float', min: 0.5, max: 12, step: 0.1, default: 4, unit: 'Hz' },
       { id: 'duty', label: 'Blitzlänge', type: 'float', min: 0.05, max: 0.6, step: 0.01, default: 0.15 },
       { id: 'color', label: 'Farbe', type: 'color', default: '#ffffff' },
+      SYNC,
     ],
     glsl: `vec4 effect(vec2 uv) {
   float on = step(fract(uTime * p_freq), p_duty);
+  // Beat-Modus: Blitz bei jedem Schlag, Länge über „Blitzlänge“
+  if (p_sync > 0.5) on = step(pow(0.86, 1.0 + p_duty * 25.0), uBeat);
   return vec4(p_color, on);
 }`,
   },
@@ -115,11 +429,13 @@ export const EFFECTS: EffectDef[] = [
       { id: 'min', label: 'Minimum', type: 'float', min: 0, max: 1, step: 0.01, default: 0.05 },
       { id: 'sharp', label: 'Härte', type: 'float', min: 0, max: 1, step: 0.01, default: 0.3 },
       { id: 'color', label: 'Farbe', type: 'color', default: '#ff2a6d' },
+      SYNC,
     ],
     glsl: `vec4 effect(vec2 uv) {
   float ph = fract(uTime * p_bpm / 60.0);
   float w = 0.5 + 0.5 * cos(ph * TAU);
   w = pow(w, 1.0 + p_sharp * 8.0);
+  if (p_sync > 0.5) w = pow(uBeat, 0.5 + p_sharp * 3.0);
   return vec4(p_color, mix(p_min, 1.0, w));
 }`,
   },
@@ -189,11 +505,15 @@ export const EFFECTS: EffectDef[] = [
       { id: 'freq', label: 'Frequenz', type: 'float', min: 0.5, max: 12, step: 0.1, default: 3, unit: 'Hz' },
       { id: 'duty', label: 'Blitzlänge', type: 'float', min: 0.05, max: 1, step: 0.01, default: 0.5 },
       { id: 'sat', label: 'Sättigung', type: 'float', min: 0, max: 1, step: 0.01, default: 1 },
+      SYNC,
     ],
     glsl: `vec4 effect(vec2 uv) {
   float k = floor(uTime * p_freq);
+  float on = step(fract(uTime * p_freq), p_duty);
+  // Beat-Modus: neue Farbe bei jedem Schlag
+  if (p_sync > 0.5) { k = uBeatCount; on = step(pow(0.86, 1.0 + p_duty * 25.0), uBeat); }
   vec3 c = hsv2rgb(vec3(hash11(k * 1.73 + uSeed * 91.0), p_sat, 1.0));
-  return vec4(c, step(fract(uTime * p_freq), p_duty));
+  return vec4(c, on);
 }`,
   },
   {

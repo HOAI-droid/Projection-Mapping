@@ -2,7 +2,7 @@
 
 import type { ClientMessage, Role, ServerMessage } from '../../../shared/protocol.js';
 import { applyOp, type Op } from '../../../shared/state.js';
-import type { AppState, MediaItem, Presence, SessionMeta } from '../../../shared/types.js';
+import type { AppState, AudioFrame, MediaItem, Presence, SessionMeta } from '../../../shared/types.js';
 
 export type ConnStatus = 'connecting' | 'online' | 'offline';
 
@@ -32,6 +32,12 @@ export class Connection {
   private confirmed: AppState | null = null;
   private pending: { seq: number; op: Op }[] = [];
   private seq = 0;
+  /** Abstand Server-Uhr minus eigene Uhr (ms), aus Ping/Pong geschätzt */
+  private clockOffset = 0;
+  private clockSamples: { offset: number; rtt: number }[] = [];
+  /** Letzte Audio-Analyse (lokal erzeugt oder von einem anderen Fenster empfangen) */
+  audio: AudioFrame | null = null;
+  audioAt = 0;
 
   snapshot: Snapshot = {
     status: 'connecting',
@@ -94,6 +100,29 @@ export class Connection {
     this.pending = this.pending.filter((p) => p.seq > seq);
   }
 
+  /** Aktuelle Zeit auf der Server-Uhr (für Überblendungen und Playlist) */
+  serverNow(): number {
+    return Date.now() + this.clockOffset;
+  }
+
+  /** Audio-Analyse an alle anderen Fenster schicken und selbst verwenden */
+  sendAudio(frame: AudioFrame): void {
+    this.setAudio(frame);
+    if (this.ws?.readyState === WebSocket.OPEN && this.ws.bufferedAmount < 64 * 1024) {
+      this.ws.send(JSON.stringify({ t: 'audio', frame } satisfies ClientMessage));
+    }
+  }
+
+  private setAudio(frame: AudioFrame): void {
+    this.audio = frame;
+    this.audioAt = performance.now();
+  }
+
+  /** Audio-Analyse, wenn sie frisch ist (sonst null → Effekte laufen ohne Musik) */
+  currentAudio(): AudioFrame | null {
+    return this.audio && performance.now() - this.audioAt < 500 ? this.audio : null;
+  }
+
   undo(): void {
     this.send({ t: 'undo' });
   }
@@ -118,6 +147,9 @@ export class Connection {
       this.retry = 0;
       ws.send(JSON.stringify({ t: 'hello', role: this.role } satisfies ClientMessage));
       window.clearInterval(this.pingTimer);
+      this.clockSamples = [];
+      // Anfangs schneller pingen, damit die Uhr rasch abgeglichen ist
+      for (const d of [50, 300, 700]) window.setTimeout(() => this.send({ t: 'ping', at: performance.now() }), d);
       this.pingTimer = window.setInterval(() => this.send({ t: 'ping', at: performance.now() }), 3000);
     };
     ws.onmessage = (ev) => {
@@ -181,9 +213,18 @@ export class Connection {
       case 'toast':
         for (const fn of this.toastListeners) fn({ level: msg.level, message: msg.message });
         break;
-      case 'pong':
-        this.update({ rtt: Math.round(performance.now() - msg.at) });
+      case 'audio':
+        this.setAudio(msg.frame);
         break;
+      case 'pong': {
+        const rtt = performance.now() - msg.at;
+        // Messung mit der kürzesten Laufzeit ist die genaueste
+        this.clockSamples.push({ offset: msg.server + rtt / 2 - Date.now(), rtt });
+        this.clockSamples = this.clockSamples.slice(-8);
+        this.clockOffset = this.clockSamples.reduce((a, b) => (b.rtt < a.rtt ? b : a)).offset;
+        this.update({ rtt: Math.round(rtt) });
+        break;
+      }
     }
   }
 }

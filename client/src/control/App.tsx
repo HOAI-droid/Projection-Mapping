@@ -4,7 +4,9 @@ import { LayersPanel } from './LayersPanel';
 import { MasksPanel } from './MasksPanel';
 import { MediaPanel } from './MediaPanel';
 import { ProjectDialog } from './ProjectDialog';
+import { AudioPanel } from './AudioPanel';
 import { PropertiesPanel } from './PropertiesPanel';
+import { ScenesPanel } from './ScenesPanel';
 import { Stage } from './Stage';
 import { Toolbar } from './Toolbar';
 import { sendProject, TopBar } from './TopBar';
@@ -66,12 +68,11 @@ export function App() {
             <Stage />
             <div className="shortcuts">
               Ziehen: Ecke/Fläche · Pinch: skalieren · ⌥+Scrollen: drehen · Pfeile: 1 px (⇧ 10 px) · Tab: nächste Ecke ·
-              V Fläche · M Maske · S Snap · G Raster · ⇧G Testgitter · E Bearbeiten/Show · ⌘Z/⇧⌘Z
+              V Fläche · M Maske · S Snap · G Raster · ⇧G Testgitter · E Bearbeiten/Show · 1–9 Szene · N nächste · B Blackout · ⌘Z
             </div>
           </main>
           <aside className="sidebar right">
-            <PropertiesPanel />
-            <MediaPanel />
+            <RightTabs />
           </aside>
         </div>
       )}
@@ -84,5 +85,47 @@ export function App() {
         ))}
       </div>
     </div>
+  );
+}
+
+type RightTab = 'surface' | 'show' | 'audio' | 'media';
+const RIGHT_TABS: { id: RightTab; label: string }[] = [
+  { id: 'surface', label: 'Fläche' },
+  { id: 'show', label: 'Show' },
+  { id: 'audio', label: 'Audio ♪' },
+  { id: 'media', label: 'Medien' },
+];
+
+/** Rechte Seitenleiste mit Reitern; der gewählte Reiter wird gemerkt */
+function RightTabs() {
+  const [tab, setTab] = useState<RightTab>(() => {
+    try {
+      return (localStorage.getItem('pm.rightTab') as RightTab | null) ?? 'surface';
+    } catch {
+      return 'surface';
+    }
+  });
+  const choose = (t: RightTab) => {
+    setTab(t);
+    try {
+      localStorage.setItem('pm.rightTab', t);
+    } catch {
+      /* egal */
+    }
+  };
+  return (
+    <>
+      <div className="tabs">
+        {RIGHT_TABS.map((t) => (
+          <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => choose(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === 'surface' && <PropertiesPanel />}
+      {tab === 'show' && <ScenesPanel />}
+      {tab === 'audio' && <AudioPanel />}
+      {tab === 'media' && <MediaPanel />}
+    </>
   );
 }
