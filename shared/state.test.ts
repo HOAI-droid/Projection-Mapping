@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyOp, createProject, defaultView, parseOp, parseProject } from './state.js';
+import { applyOp, createMask, createProject, createSurface, defaultView, findMask, parseOp, parseProject } from './state.js';
 import type { AppState } from './types.js';
 
 function initial(): AppState {
@@ -11,7 +11,7 @@ describe('applyOp', () => {
     const s0 = initial();
     const s1 = applyOp(s0, { kind: 'setCorner', surfaceId: 's1', index: 2, point: { x: 0.9, y: 0.95 } });
     expect(s1.project.surfaces[0]!.corners[2]).toEqual({ x: 0.9, y: 0.95 });
-    expect(s0.project.surfaces[0]!.corners[2]).toEqual({ x: 0.8, y: 0.8 });
+    expect(s0.project.surfaces[0]!.corners[2]).toEqual({ x: 0.7, y: 0.75 });
   });
 
   it('ignoriert unbekannte Flächen', () => {
@@ -54,5 +54,76 @@ describe('parseProject', () => {
   it('liest ein gespeichertes Projekt wieder ein', () => {
     const p = createProject('Kiste', 'abc');
     expect(parseProject(JSON.parse(JSON.stringify(p)))).toEqual(p);
+  });
+});
+
+describe('Flächen und Masken', () => {
+  it('fügt Flächen ein, verschiebt Ebenen und löscht', () => {
+    let s = initial();
+    s = applyOp(s, { kind: 'addSurface', surface: createSurface('s2', 'Zwei'), index: 1 });
+    s = applyOp(s, { kind: 'addSurface', surface: createSurface('s3', 'Drei'), index: 0 });
+    expect(s.project.surfaces.map((x) => x.id)).toEqual(['s3', 's1', 's2']);
+    s = applyOp(s, { kind: 'moveSurface', surfaceId: 's3', index: 2 });
+    expect(s.project.surfaces.map((x) => x.id)).toEqual(['s1', 's2', 's3']);
+    s = applyOp(s, { kind: 'removeSurface', surfaceId: 's2' });
+    expect(s.project.surfaces.map((x) => x.id)).toEqual(['s1', 's3']);
+  });
+
+  it('weist doppelte IDs ab', () => {
+    const s0 = initial();
+    expect(applyOp(s0, { kind: 'addSurface', surface: createSurface('s1', 'Doppelt'), index: 0 })).toBe(s0);
+  });
+
+  it('verwaltet globale und Flächenmasken', () => {
+    let s = initial();
+    s = applyOp(s, { kind: 'addMask', surfaceId: null, mask: createMask('g1', 'Global') });
+    s = applyOp(s, { kind: 'addMask', surfaceId: 's1', mask: createMask('m1', 'Lokal') });
+    expect(findMask(s.project, 'g1')?.surface).toBeNull();
+    expect(findMask(s.project, 'm1')?.surface?.id).toBe('s1');
+
+    const pts = [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.5, y: 0.9 }];
+    s = applyOp(s, { kind: 'setMaskPoints', maskId: 'm1', points: pts });
+    s = applyOp(s, { kind: 'updateMask', maskId: 'm1', patch: { invert: true, feather: 12 } });
+    expect(findMask(s.project, 'm1')?.mask).toMatchObject({ points: pts, invert: true, feather: 12 });
+
+    s = applyOp(s, { kind: 'removeMask', maskId: 'm1' });
+    s = applyOp(s, { kind: 'removeMask', maskId: 'g1' });
+    expect(s.project.masks).toEqual([]);
+    expect(s.project.surfaces[0]!.masks).toEqual([]);
+  });
+});
+
+describe('Validierung neuer Operationen', () => {
+  it('prüft Farben, Mischmodi und Maskenwerte', () => {
+    expect(parseOp({ kind: 'setContent', surfaceId: 's1', content: { type: 'color', color: 'red' } })).toBeNull();
+    expect(parseOp({ kind: 'setContent', surfaceId: 's1', content: { type: 'color', color: '#FF0000' } })).toEqual({
+      kind: 'setContent',
+      surfaceId: 's1',
+      content: { type: 'color', color: '#ff0000' },
+    });
+    expect(parseOp({ kind: 'updateSurface', surfaceId: 's1', patch: { blend: 'nonsense', opacity: 3 } })).toEqual({
+      kind: 'updateSurface',
+      surfaceId: 's1',
+      patch: { opacity: 1 },
+    });
+    expect(parseOp({ kind: 'updateMask', maskId: 'm1', patch: { feather: 9999 } })).toEqual({
+      kind: 'updateMask',
+      maskId: 'm1',
+      patch: { feather: 200 },
+    });
+    expect(parseOp({ kind: 'addMask', surfaceId: '../x', mask: createMask('m1', 'x') })).toBeNull();
+    expect(parseOp({ kind: 'setMaskPoints', maskId: 'm1', points: new Array(501).fill({ x: 0, y: 0 }) })).toBeNull();
+  });
+
+  it('liest Projekte im alten Format 1 ein', () => {
+    const v1 = {
+      format: 1,
+      name: 'Alt',
+      surfaces: [{ id: 'a', name: 'A', visible: true, corners: createSurface('a', 'A').corners, content: { type: 'testgrid' } }],
+    };
+    const p = parseProject(v1)!;
+    expect(p.format).toBe(2);
+    expect(p.masks).toEqual([]);
+    expect(p.surfaces[0]).toMatchObject({ locked: false, opacity: 1, blend: 'normal', fit: 'stretch', masks: [] });
   });
 });

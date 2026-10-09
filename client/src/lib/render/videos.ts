@@ -1,8 +1,8 @@
 // Verwaltet <video>-Elemente und ihre Texturen. Ein Element pro Medium, auch wenn
 // mehrere Flächen dasselbe Video zeigen.
 
-import type { Project, VideoContent } from '../../../shared/types.js';
-import { mediaUrl } from '../lib/connection';
+import type { Project, VideoContent } from '../../../../shared/types.js';
+import { mediaUrl } from '../connection';
 import type { Renderer } from './renderer';
 
 interface Entry {
@@ -14,19 +14,20 @@ interface Entry {
   lastTime: number;
 }
 
-/** requestVideoFrameCallback meldet jedes neue Videobild (Safari 15.4+, Chrome 83+). */
+/** requestVideoFrameCallback meldet jedes neue Videobild (Chrome 83+, Safari 15.4+). */
 const HAS_RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
 export class VideoPool {
   private entries = new Map<string, Entry>();
   private container: HTMLElement;
-  /** Darf abgespielt werden? (erst nach „Tippen zum Starten“ garantiert) */
-  unlocked = false;
+  /** Ein play() wurde vom Browser abgelehnt (Autoplay-Sperre) */
+  blocked = false;
 
   constructor(private renderer: Renderer) {
-    // iOS dekodiert Videos zuverlässiger, wenn sie im DOM hängen – daher unsichtbar einhängen
+    // Videos unsichtbar im DOM halten (manche Browser dekodieren sonst nicht zuverlässig)
     this.container = document.createElement('div');
-    this.container.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;overflow:hidden';
+    this.container.style.cssText =
+      'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;overflow:hidden';
     document.body.appendChild(this.container);
   }
 
@@ -52,14 +53,14 @@ export class VideoPool {
     }
   }
 
-  /** Nach dem Benutzer-Tipp alle wartenden Videos anstoßen. */
+  /** Nach einem Klick (Benutzergeste) alle wartenden Videos erneut anstoßen. */
   unlock(project: Project): void {
-    this.unlocked = true;
+    this.blocked = false;
     this.sync(project);
   }
 
   /** Lädt neue Videobilder in die Texturen. Gibt die Textur zurück, sobald ein Bild da ist. */
-  texture(mediaId: string): WebGLTexture | null {
+  texture(mediaId: string): { texture: WebGLTexture; width: number; height: number } | null {
     const e = this.entries.get(mediaId);
     if (!e) return null;
     const v = e.video;
@@ -67,13 +68,13 @@ export class VideoPool {
       // Ohne requestVideoFrameCallback: hochladen, wenn sich die Zeit geändert hat
       const changed = HAS_RVFC ? e.dirty : v.currentTime !== e.lastTime || !e.hasFrame;
       if (changed) {
-        this.renderer.upload(e.texture, v);
+        this.renderer.upload(e.texture, v, { premultiply: false });
         e.dirty = false;
         e.hasFrame = true;
         e.lastTime = v.currentTime;
       }
     }
-    return e.hasFrame ? e.texture : null;
+    return e.hasFrame ? { texture: e.texture, width: v.videoWidth, height: v.videoHeight } : null;
   }
 
   private create(id: string): Entry {
@@ -82,7 +83,6 @@ export class VideoPool {
     v.defaultMuted = true;
     v.playsInline = true;
     v.setAttribute('playsinline', '');
-    v.setAttribute('webkit-playsinline', '');
     v.setAttribute('muted', '');
     v.preload = 'auto';
     v.crossOrigin = 'anonymous';
@@ -104,8 +104,8 @@ export class VideoPool {
   }
 
   private play(v: HTMLVideoElement): void {
-    v.play().catch(() => {
-      // Autoplay blockiert → wird nach „Tippen zum Starten“ erneut versucht
+    v.play().catch((err: unknown) => {
+      if (err instanceof DOMException && err.name === 'NotAllowedError') this.blocked = true;
     });
   }
 
@@ -116,5 +116,10 @@ export class VideoPool {
     e.video.remove();
     this.renderer.deleteTexture(e.texture);
     this.entries.delete(id);
+  }
+
+  dispose(): void {
+    for (const [id, e] of this.entries) this.destroy(id, e);
+    this.container.remove();
   }
 }

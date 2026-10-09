@@ -20,7 +20,8 @@ const certDir = resolve(process.env.CERT_DIR ?? join(root, 'certs'));
 export const config = {
   root,
   dev: process.argv.includes('--dev'),
-  host: process.env.HOST ?? '0.0.0.0',
+  /** Standard: nur dieser Rechner. HOST=0.0.0.0 erlaubt Zugriff aus dem Heimnetz (z. B. iPhone). */
+  host: process.env.HOST ?? '127.0.0.1',
   httpsPort: Number(process.env.HTTPS_PORT ?? 8443),
   httpPort: Number(process.env.HTTP_PORT ?? 8080),
   clientDir: join(root, 'dist', 'client'),

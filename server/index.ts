@@ -1,5 +1,6 @@
 // Einstiegspunkt: HTTP(S)-Server, API, Auslieferung des Frontends, WebSocket.
 
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import http from 'node:http';
@@ -10,7 +11,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import multer from 'multer';
 import { config } from './config.js';
 import { Hub } from './hub.js';
-import { checkFfmpeg, MediaLibrary } from './media.js';
+import { checkFfmpeg, isImageUpload, isVideoUpload, MediaLibrary } from './media.js';
 import { Store } from './store.js';
 
 const PAGES: Record<string, string> = { '/control': 'control.html', '/output': 'output.html' };
@@ -36,8 +37,7 @@ async function main(): Promise<void> {
     dest: config.uploadTmpDir,
     limits: { fileSize: config.maxUploadBytes, files: 1 },
     fileFilter: (_req, file, cb) => {
-      const ok = file.mimetype.startsWith('video/') || /\.(mov|mp4|m4v|webm|mkv|avi|3gp)$/i.test(file.originalname);
-      cb(null, ok);
+      cb(null, isVideoUpload(file.mimetype, file.originalname) || isImageUpload(file.mimetype, file.originalname));
     },
   });
 
@@ -47,10 +47,12 @@ async function main(): Promise<void> {
 
   app.post('/api/media', upload.single('file'), async (req, res) => {
     if (!req.file) {
-      res.status(415).json({ error: 'Bitte eine Videodatei auswählen' });
+      res.status(415).json({ error: 'Bitte ein Video oder Bild auswählen' });
       return;
     }
-    const item = await media.add(req.file.path, Buffer.from(req.file.originalname, 'latin1').toString('utf8'));
+    const name = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+    const kind = isImageUpload(req.file.mimetype, name) ? 'image' : 'video';
+    const item = await media.add(req.file.path, name, kind);
     hub.broadcastMedia();
     res.status(202).json(item);
   });
@@ -61,9 +63,9 @@ async function main(): Promise<void> {
       res.status(404).json({ error: 'Nicht gefunden' });
       return;
     }
-    // Flächen, die das Video zeigen, leeren
+    // Flächen, die das Medium zeigen, leeren
     for (const s of store.state.project.surfaces) {
-      if (s.content.type === 'video' && s.content.mediaId === id) {
+      if ((s.content.type === 'video' || s.content.type === 'image') && s.content.mediaId === id) {
         const op = { kind: 'setContent', surfaceId: s.id, content: { type: 'none' } } as const;
         store.apply(op);
         hub.broadcast({ t: 'op', op });
@@ -185,18 +187,21 @@ function lanAddresses(): string[] {
 
 function printUrls(port: number): void {
   const proto = hasCerts() ? 'https' : 'http';
-  const hosts = [...lanAddresses(), `${hostname()}.local`];
+  const local = `${proto}://localhost:${port}`;
   console.log(`\nProjection Mapping läuft${config.dev ? ' (Entwicklungsmodus)' : ''}.`);
-  for (const h of hosts) {
-    console.log(`  Steuerung: ${proto}://${h}:${port}/control`);
-    console.log(`  Ausgabe:   ${proto}://${h}:${port}/output`);
-  }
-  if (hasCerts()) {
-    console.log(`  Zertifikat fürs iPhone/iPad: http://${hosts[0] ?? 'localhost'}:${config.httpPort}/`);
-  } else {
-    console.log('\n⚠  Keine Zertifikate gefunden → läuft ohne HTTPS. Kamera/Mikrofon gehen auf iOS erst mit „npm run certs“.');
+  console.log(`  Steuerung: ${local}/control`);
+  console.log(`  Ausgabe:   ${local}/output   (oder in der Steuerung „Ausgabe öffnen“)`);
+  if (config.host !== '127.0.0.1' && config.host !== 'localhost') {
+    for (const h of [...lanAddresses(), `${hostname()}.local`]) console.log(`  Im Netz:   ${proto}://${h}:${port}/control`);
   }
   console.log('');
+  if (process.platform === 'darwin' && !config.dev && process.env.NO_OPEN !== '1') {
+    // Steuerung direkt in Chrome öffnen (fällt auf den Standardbrowser zurück)
+    const child = spawn('open', ['-a', 'Google Chrome', `${local}/control`], { stdio: 'ignore' });
+    child.on('exit', (code) => {
+      if (code !== 0) spawn('open', [`${local}/control`], { stdio: 'ignore' });
+    });
+  }
 }
 
 function certLandingPage(host: string): string {

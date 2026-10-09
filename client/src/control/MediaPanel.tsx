@@ -1,7 +1,9 @@
+// Medienbibliothek: Upload (Knopf oder Dateien hineinziehen), Liste, Zuweisen.
+
 import { useRef, useState } from 'react';
 import type { MediaItem } from '../../../shared/types.js';
 import { mediaUrl } from '../lib/connection';
-import { activeSurface, conn, useSnapshot } from './store';
+import { conn, useSnapshot } from './store';
 
 interface Upload {
   id: number;
@@ -10,23 +12,19 @@ interface Upload {
   error?: string;
 }
 
-export function MediaTab() {
+const ACCEPT = 'video/*,image/*,.heic,.heif,.mov';
+
+export function MediaPanel() {
   const snap = useSnapshot();
   const input = useRef<HTMLInputElement>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
-  const surface = activeSurface(snap);
-
-  const startUploads = (files: FileList | null) => {
-    if (!files) return;
-    for (const file of Array.from(files)) uploadFile(file);
-    if (input.current) input.current.value = '';
-  };
+  const [dragOver, setDragOver] = useState(false);
+  const surfaceId = snap.state?.view.selectedSurfaceId ?? null;
 
   const uploadFile = (file: File) => {
     const id = Date.now() + Math.random();
     const patch = (p: Partial<Upload>) => setUploads((list) => list.map((u) => (u.id === id ? { ...u, ...p } : u)));
     setUploads((list) => [...list, { id, name: file.name, progress: 0 }]);
-
     // XHR statt fetch, weil nur XHR einen Upload-Fortschritt liefert
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/media');
@@ -50,37 +48,51 @@ export function MediaTab() {
     xhr.send(form);
   };
 
+  const addFiles = (files: FileList | null) => {
+    if (!files) return;
+    for (const f of Array.from(files)) uploadFile(f);
+    if (input.current) input.current.value = '';
+  };
+
   const remove = async (m: MediaItem) => {
-    if (!confirm(`„${m.name}“ löschen?`)) return;
+    if (!confirm(`„${m.name}“ löschen? Flächen, die es zeigen, werden geleert.`)) return;
     await fetch(`/api/media/${encodeURIComponent(m.id)}`, { method: 'DELETE' });
   };
 
-  const showOnSurface = (m: MediaItem) => {
-    if (!surface) return;
+  const assign = (m: MediaItem) => {
+    if (!surfaceId) return;
     conn.op({
       kind: 'setContent',
-      surfaceId: surface.id,
-      content: { type: 'video', mediaId: m.id, loop: true, speed: 1, playing: true },
+      surfaceId,
+      content:
+        m.kind === 'image'
+          ? { type: 'image', mediaId: m.id }
+          : { type: 'video', mediaId: m.id, loop: true, speed: 1, playing: true },
     });
   };
 
   return (
-    <div className="page">
-      <h2>Medien</h2>
-      <input
-        ref={input}
-        type="file"
-        accept="video/*"
-        multiple
-        hidden
-        onChange={(e) => startUploads(e.target.files)}
-      />
-      <button className="primary big-btn full" onClick={() => input.current?.click()}>
-        ⇪ Video hochladen
-      </button>
-      <p className="muted small">
-        Videos werden auf dem Server in H.264 (max. 1280×720, ohne Ton) umgewandelt. Das dauert je nach Länge etwas.
-      </p>
+    <section
+      className={`panel-section media${dragOver ? ' drag-over' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        addFiles(e.dataTransfer.files);
+      }}
+    >
+      <div className="section-head">
+        <h3>Medien</h3>
+        <button className="small-btn" onClick={() => input.current?.click()}>
+          + Hochladen
+        </button>
+      </div>
+      <input ref={input} type="file" accept={ACCEPT} multiple hidden onChange={(e) => addFiles(e.target.files)} />
+      <p className="muted small">Videos und Bilder hierher ziehen. Videos werden in H.264 (max. 1280×720, ohne Ton) umgewandelt.</p>
 
       {uploads.map((u) => (
         <div key={u.id} className="media-row">
@@ -92,15 +104,9 @@ export function MediaTab() {
               <Progress value={u.progress} label={`Hochladen ${Math.round(u.progress * 100)} %`} />
             )}
           </div>
-          {u.error && (
-            <button className="secondary" onClick={() => setUploads((l) => l.filter((x) => x.id !== u.id))}>
-              OK
-            </button>
-          )}
+          {u.error && <button onClick={() => setUploads((l) => l.filter((x) => x.id !== u.id))}>OK</button>}
         </div>
       ))}
-
-      {snap.media.length === 0 && uploads.length === 0 && <p className="empty">Noch keine Medien.</p>}
 
       {snap.media.map((m) => (
         <div key={m.id} className="media-row">
@@ -110,30 +116,32 @@ export function MediaTab() {
             <div className="media-thumb placeholder">{m.status === 'error' ? '⚠' : '…'}</div>
           )}
           <div className="media-info">
-            <div className="media-name">{m.name}</div>
+            <div className="media-name" title={m.name}>
+              {m.kind === 'image' ? '🖼 ' : '🎞 '}
+              {m.name}
+            </div>
             {m.status === 'processing' && (
               <Progress value={m.progress} label={`Umwandeln ${Math.round(m.progress * 100)} %`} />
             )}
             {m.status === 'error' && <div className="error-text">{m.error ?? 'Fehler'}</div>}
             {m.status === 'ready' && (
               <div className="muted small">
-                {m.width}×{m.height} · {formatDuration(m.duration ?? 0)}
+                {m.width}×{m.height}
+                {m.kind === 'video' && ` · ${formatDuration(m.duration ?? 0)}`}
               </div>
             )}
           </div>
-          <div className="media-actions">
-            {m.status === 'ready' && surface && (
-              <button className="secondary" onClick={() => showOnSurface(m)}>
-                Zeigen
-              </button>
-            )}
-            <button className="danger icon" aria-label="Löschen" onClick={() => void remove(m)}>
-              ✕
+          {m.status === 'ready' && (
+            <button className="small-btn" disabled={!surfaceId} onClick={() => assign(m)} title="Auf gewählte Fläche legen">
+              Zuweisen
             </button>
-          </div>
+          )}
+          <button className="icon-btn danger" aria-label="Löschen" onClick={() => void remove(m)}>
+            ✕
+          </button>
         </div>
       ))}
-    </div>
+    </section>
   );
 }
 

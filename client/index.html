@@ -20,19 +20,9 @@
   <body>
     <main>
       <h1>Projection Mapping</h1>
-      <a class="btn" href="/control"><b>Steuerung</b><span>Auf dem iPhone öffnen</span></a>
-      <a class="btn" href="/output"><b>Ausgabe</b><span>Auf dem Gerät am Beamer öffnen (iPad oder Beamer-Browser)</span></a>
-      <p class="small" id="https"></p>
-      <p class="small">Tipp: In Safari „Teilen → Zum Home-Bildschirm“ – dann verschwindet die Browserleiste.</p>
+      <a class="btn" href="/control"><b>Steuerung</b><span>Hier wird gemappt – öffnet die Ausgabe per Knopf auf dem Beamer</span></a>
+      <a class="btn" href="/output"><b>Ausgabe</b><span>Vollbild für den Beamer (F drücken)</span></a>
+      <p class="small">Am besten in Google Chrome verwenden.</p>
     </main>
-    <script type="module">
-      const el = document.getElementById('https');
-      if (location.protocol !== 'https:') {
-        el.className = 'small warn';
-        el.textContent = 'Achtung: Verbindung ohne HTTPS. Für Kamera und Mikrofon (spätere Phasen) „npm run certs“ auf dem Server ausführen.';
-      } else {
-        el.innerHTML = 'Zertifikat noch nicht installiert? <a href="/rootCA.crt" style="color:#3b82f6">Root-Zertifikat herunterladen</a>';
-      }
-    </script>
   </body>
 </html>

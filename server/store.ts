@@ -25,10 +25,20 @@ const projectFile = (id: string) => join(config.projectsDir, `${id}.json`);
 
 export class StoreError extends Error {}
 
+const HISTORY_LIMIT = 200;
+
 export class Store {
   state: AppState = { project: createProject('Neues Projekt', newId()), view: defaultView() };
-  session: SessionMeta = { currentProjectId: null, dirty: false, projects: [] };
+  private meta = { currentProjectId: null as string | null, dirty: false, projects: [] as ProjectMeta[] };
   private autosaveTimer: NodeJS.Timeout | null = null;
+  // Rückgängig/Wiederherstellen: Projekt-Schnappschüsse (unveränderliche Objekte, daher billig)
+  private undoStack: Project[] = [];
+  private redoStack: Project[] = [];
+  private lastGesture: string | null = null;
+
+  get session(): SessionMeta {
+    return { ...this.meta, canUndo: this.undoStack.length > 0, canRedo: this.redoStack.length > 0 };
+  }
 
   /** Lädt den zuletzt aktiven Stand (auch ungespeichert), damit ein Neustart nichts verliert. */
   async init(): Promise<void> {
@@ -37,56 +47,95 @@ export class Store {
       const project = parseProject(raw.project);
       if (project) {
         this.state = { project, view: defaultView() };
-        this.session.currentProjectId = typeof raw.currentProjectId === 'string' ? raw.currentProjectId : null;
-        this.session.dirty = raw.dirty === true;
+        this.meta.currentProjectId = typeof raw.currentProjectId === 'string' ? raw.currentProjectId : null;
+        this.meta.dirty = raw.dirty === true;
       }
     } catch {
       // Erster Start oder kaputte Datei → Standardprojekt
     }
-    this.session.projects = await this.listProjects();
+    this.meta.projects = await this.listProjects();
   }
 
-  apply(op: Op): void {
-    const next = applyOp(this.state, op);
-    if (next === this.state) return;
+  /** Wendet eine Operation an. Gibt false zurück, wenn sie nichts geändert hat. */
+  apply(op: Op, gesture?: string): boolean {
+    const prev = this.state;
+    const next = applyOp(prev, op);
+    if (next === prev) return false;
     this.state = next;
     if (touchesProject(op)) {
-      this.session.dirty = true;
+      // Neue Geste → neuer Rückgängig-Schritt; Folge-Ops derselben Geste werden zusammengefasst
+      if (!gesture || gesture !== this.lastGesture) {
+        this.undoStack.push(prev.project);
+        if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
+        this.redoStack = [];
+      }
+      this.lastGesture = gesture ?? null;
+      this.meta.dirty = true;
       this.scheduleAutosave();
     }
+    return true;
+  }
+
+  undo(): boolean {
+    const prev = this.undoStack.pop();
+    if (!prev) return false;
+    this.redoStack.push(this.state.project);
+    this.restore(prev);
+    return true;
+  }
+
+  redo(): boolean {
+    const next = this.redoStack.pop();
+    if (!next) return false;
+    this.undoStack.push(this.state.project);
+    this.restore(next);
+    return true;
+  }
+
+  private restore(project: Project): void {
+    this.state = { ...this.state, project };
+    this.lastGesture = null;
+    this.meta.dirty = true;
+    this.scheduleAutosave();
+  }
+
+  private clearHistory(): void {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.lastGesture = null;
   }
 
   // --- Projekte -------------------------------------------------------------
 
   async save(): Promise<void> {
-    const id = this.session.currentProjectId ?? newId();
+    const id = this.meta.currentProjectId ?? newId();
     await this.writeProject(id, this.state.project);
-    this.session.currentProjectId = id;
-    this.session.dirty = false;
-    await this.afterProjectChange();
+    this.meta.currentProjectId = id;
+    this.meta.dirty = false;
+    await this.refreshList();
   }
 
   async saveAs(name: string): Promise<void> {
     const id = newId();
     this.state = { ...this.state, project: { ...this.state.project, name: cleanName(name) } };
     await this.writeProject(id, this.state.project);
-    this.session.currentProjectId = id;
-    this.session.dirty = false;
-    await this.afterProjectChange();
+    this.meta.currentProjectId = id;
+    this.meta.dirty = false;
+    await this.refreshList();
   }
 
   async load(id: string): Promise<void> {
     const file = await this.readProjectFile(id);
-    this.state = { project: file.project, view: { ...defaultView(), showOutlines: this.state.view.showOutlines } };
-    this.session.currentProjectId = id;
-    this.session.dirty = false;
+    this.state = { project: file.project, view: { ...defaultView(), editMode: this.state.view.editMode } };
+    this.meta.currentProjectId = id;
+    this.meta.dirty = false;
     await this.afterProjectChange();
   }
 
   async newProject(name: string): Promise<void> {
     this.state = { project: createProject(cleanName(name), newId()), view: defaultView() };
-    this.session.currentProjectId = null;
-    this.session.dirty = true;
+    this.meta.currentProjectId = null;
+    this.meta.dirty = true;
     await this.afterProjectChange();
   }
 
@@ -94,24 +143,30 @@ export class Store {
     const file = await this.readProjectFile(id);
     file.project.name = cleanName(name);
     await this.writeProject(id, file.project);
-    if (this.session.currentProjectId === id) {
+    if (this.meta.currentProjectId === id) {
       this.state = { ...this.state, project: { ...this.state.project, name: file.project.name } };
     }
-    await this.afterProjectChange();
+    await this.refreshList();
   }
 
   async delete(id: string): Promise<void> {
     await this.readProjectFile(id); // existiert?
     await unlink(projectFile(id));
-    if (this.session.currentProjectId === id) {
-      this.session.currentProjectId = null;
-      this.session.dirty = true;
+    if (this.meta.currentProjectId === id) {
+      this.meta.currentProjectId = null;
+      this.meta.dirty = true;
     }
-    await this.afterProjectChange();
+    await this.refreshList();
   }
 
+  /** Nach Laden/Neu: Verlauf gehört zum alten Projekt → verwerfen */
   private async afterProjectChange(): Promise<void> {
-    this.session.projects = await this.listProjects();
+    this.clearHistory();
+    await this.refreshList();
+  }
+
+  private async refreshList(): Promise<void> {
+    this.meta.projects = await this.listProjects();
     await this.writeCurrent();
   }
 
@@ -165,8 +220,8 @@ export class Store {
 
   async writeCurrent(): Promise<void> {
     const data: CurrentFile = {
-      currentProjectId: this.session.currentProjectId,
-      dirty: this.session.dirty,
+      currentProjectId: this.meta.currentProjectId,
+      dirty: this.meta.dirty,
       project: this.state.project,
     };
     await writeJsonAtomic(CURRENT_FILE(), data);

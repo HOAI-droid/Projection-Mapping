@@ -13,6 +13,19 @@ const metaFile = (id: string) => join(dirOf(id), 'meta.json');
 
 export const VIDEO_FILE = 'video.mp4';
 export const THUMB_FILE = 'thumb.jpg';
+/** Längste Bildkante nach der Umwandlung (Texturen bis 2048 px sind überall unproblematisch) */
+const IMAGE_MAX = 2048;
+
+const IMAGE_EXT = /\.(jpe?g|png|heic|heif|webp|gif|tiff?|bmp|avif)$/i;
+const ALPHA_EXT = /\.(png|webp|gif|tiff?)$/i;
+
+export function isImageUpload(mimetype: string, name: string): boolean {
+  return mimetype.startsWith('image/') || IMAGE_EXT.test(name);
+}
+
+export function isVideoUpload(mimetype: string, name: string): boolean {
+  return mimetype.startsWith('video/') || /\.(mov|mp4|m4v|webm|mkv|avi|3gp)$/i.test(name);
+}
 
 interface ProbeInfo {
   duration: number;
@@ -25,6 +38,8 @@ export class MediaLibrary {
   private queue: string[] = [];
   private busy = false;
   private hasZscale = false;
+  /** Hardware-Encoder auf dem Mac (Apple Silicon) – um ein Vielfaches schneller als libx264 */
+  private hasVideotoolbox = false;
   private notifyTimer: NodeJS.Timeout | null = null;
 
   /** Wird bei jeder Änderung aufgerufen (gedrosselt). */
@@ -35,10 +50,14 @@ export class MediaLibrary {
     await rm(config.uploadTmpDir, { recursive: true, force: true });
     await mkdir(config.uploadTmpDir, { recursive: true });
     this.hasZscale = await detectFilter('zscale');
+    this.hasVideotoolbox = process.platform === 'darwin' && (await detectEncoder('h264_videotoolbox'));
 
     for (const id of await readdir(config.mediaDir)) {
       try {
         const item = (await readJson(metaFile(id))) as MediaItem;
+        // Einträge aus v0.1 kennen nur Videos
+        item.kind ??= 'video';
+        item.file ??= VIDEO_FILE;
         if (item.status === 'processing') {
           // Server wurde während der Transkodierung beendet → neu starten, falls Quelle noch da ist
           if (await this.sourceFile(id)) this.queue.push(id);
@@ -61,7 +80,7 @@ export class MediaLibrary {
   }
 
   /** Übernimmt eine hochgeladene Datei und stellt sie in die Transkodier-Warteschlange. */
-  async add(tmpPath: string, originalName: string): Promise<MediaItem> {
+  async add(tmpPath: string, originalName: string, kind: MediaItem['kind']): Promise<MediaItem> {
     const id = newId();
     await mkdir(dirOf(id), { recursive: true });
     const ext = extname(originalName).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 8) || '.bin';
@@ -69,7 +88,8 @@ export class MediaLibrary {
     const item: MediaItem = {
       id,
       name: originalName.slice(0, 200),
-      kind: 'video',
+      kind,
+      file: kind === 'video' ? VIDEO_FILE : ALPHA_EXT.test(originalName) ? 'image.png' : 'image.jpg',
       status: 'processing',
       progress: 0,
       createdAt: new Date().toISOString(),
@@ -108,7 +128,8 @@ export class MediaLibrary {
         const item = this.items.get(id);
         if (!item) continue;
         try {
-          await this.transcode(item);
+          if (item.kind === 'image') await this.convertImage(item);
+          else await this.transcode(item);
           item.status = 'ready';
           item.progress = 1;
           delete item.error;
@@ -157,6 +178,9 @@ export class MediaLibrary {
       'format=yuv420p',
     );
 
+    const encoder = this.hasVideotoolbox
+      ? ['-c:v', 'h264_videotoolbox', '-b:v', '8M', '-maxrate', '12M', '-profile:v', 'high', '-allow_sw', '1']
+      : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-profile:v', 'high', '-level:v', '4.1'];
     const args = [
       '-hide_banner', '-nostdin', '-y',
       '-i', src,
@@ -164,8 +188,7 @@ export class MediaLibrary {
       '-an', '-sn', '-dn',
       '-vf', filters.join(','),
       '-fpsmax', '60',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22',
-      '-profile:v', 'high', '-level:v', '4.1',
+      ...encoder,
       '-g', '60',
       '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709',
       '-movflags', '+faststart',
@@ -198,6 +221,46 @@ export class MediaLibrary {
       '-hide_banner', '-nostdin', '-y', '-ss', at.toFixed(2), '-i', out,
       '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '4', join(dir, THUMB_FILE),
     ]);
+    await rm(src, { force: true });
+  }
+
+  private async convertImage(item: MediaItem): Promise<void> {
+    const src = await this.sourceFile(item.id);
+    if (!src) throw new Error('Quelldatei fehlt');
+    const dir = dirOf(item.id);
+    const out = join(dir, item.file);
+    const thumb = join(dir, THUMB_FILE);
+    const png = item.file.endsWith('.png');
+
+    let done = false;
+    if (process.platform === 'darwin') {
+      // sips (in macOS eingebaut) liest HEIC/HEIF von iPhone-Fotos zuverlässig
+      try {
+        const info = await run('sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', src]);
+        const w = Number(/pixelWidth: (\d+)/.exec(info)?.[1] ?? 0);
+        const h = Number(/pixelHeight: (\d+)/.exec(info)?.[1] ?? 0);
+        const resize = Math.max(w, h) > IMAGE_MAX ? ['-Z', String(IMAGE_MAX)] : [];
+        await run('sips', ['-s', 'format', png ? 'png' : 'jpeg', ...resize, src, '--out', out]);
+        await run('sips', ['-s', 'format', 'jpeg', '-Z', '320', out, '--out', thumb]);
+        done = true;
+      } catch (err) {
+        console.warn('sips fehlgeschlagen, versuche ffmpeg:', err instanceof Error ? err.message : err);
+      }
+    }
+    if (!done) {
+      const scale =
+        `scale=w='min(${IMAGE_MAX},iw)':h='min(${IMAGE_MAX},ih)':force_original_aspect_ratio=decrease`;
+      await run(config.ffmpeg, [
+        '-hide_banner', '-nostdin', '-y', '-i', src, '-frames:v', '1', '-vf', scale,
+        ...(png ? [] : ['-q:v', '2']), out,
+      ]);
+      await run(config.ffmpeg, [
+        '-hide_banner', '-nostdin', '-y', '-i', out, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '4', thumb,
+      ]);
+    }
+    const info = await probeVideo(out);
+    item.width = info.width;
+    item.height = info.height;
     await rm(src, { force: true });
   }
 
@@ -282,6 +345,15 @@ async function probeVideo(file: string): Promise<{ width: number; height: number
     height: data.streams?.[0]?.height ?? 0,
     duration: Number(data.format?.duration ?? 0) || 0,
   };
+}
+
+async function detectEncoder(name: string): Promise<boolean> {
+  try {
+    const out = await run(config.ffmpeg, ['-hide_banner', '-encoders']);
+    return new RegExp(`\\s${name}\\s`).test(out);
+  } catch {
+    return false;
+  }
 }
 
 async function detectFilter(name: string): Promise<boolean> {

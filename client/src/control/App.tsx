@@ -1,66 +1,81 @@
 import { useEffect, useState } from 'react';
-import type { Toast } from '../lib/connection';
-import { ContentTab } from './ContentTab';
-import { MappingTab } from './MappingTab';
-import { MediaTab } from './MediaTab';
-import { ProjectTab } from './ProjectTab';
-import { StatusBar } from './StatusBar';
-import { conn, useSnapshot } from './store';
+import { handleEditorKey } from '../lib/editor/actions';
+import { LayersPanel } from './LayersPanel';
+import { MasksPanel } from './MasksPanel';
+import { MediaPanel } from './MediaPanel';
+import { ProjectDialog } from './ProjectDialog';
+import { PropertiesPanel } from './PropertiesPanel';
+import { Stage } from './Stage';
+import { Toolbar } from './Toolbar';
+import { sendProject, TopBar } from './TopBar';
+import { conn, outputSize, useSnapshot } from './store';
 
-type Tab = 'mapping' | 'content' | 'media' | 'project';
+interface ToastItem {
+  id: number;
+  level: 'info' | 'error';
+  message: string;
+}
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'mapping', label: 'Mapping', icon: '⬚' },
-  { id: 'content', label: 'Inhalt', icon: '▶' },
-  { id: 'media', label: 'Medien', icon: '⇪' },
-  { id: 'project', label: 'Projekt', icon: '☰' },
-];
+let toastId = 0;
 
 export function App() {
   const snap = useSnapshot();
-  const [tab, setTab] = useState<Tab>(() => (localStorageGet('pm.tab') as Tab | null) ?? 'mapping');
-  const [toasts, setToasts] = useState<(Toast & { id: number })[]>([]);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [projectsOpen, setProjectsOpen] = useState(false);
 
-  useEffect(() => {
-    let n = 0;
-    return conn.onToast((t) => {
-      const id = ++n;
-      setToasts((list) => [...list, { ...t, id }]);
-      setTimeout(() => setToasts((list) => list.filter((x) => x.id !== id)), t.level === 'error' ? 5000 : 2500);
-    });
-  }, []);
-
-  const choose = (t: Tab) => {
-    setTab(t);
-    localStorageSet('pm.tab', t);
+  const toast = (message: string, level: 'info' | 'error' = 'info') => {
+    const id = ++toastId;
+    setToasts((list) => [...list, { id, level, message }]);
+    setTimeout(() => setToasts((list) => list.filter((x) => x.id !== id)), level === 'error' ? 6000 : 3500);
   };
+
+  useEffect(() => conn.onToast((t) => toast(t.message, t.level)), []);
+
+  // Tastaturkürzel (gleiche wie auf der Ausgabe) + ⌘S
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        const st = conn.snapshot;
+        if (st.session?.currentProjectId) sendProject({ action: 'save' });
+        else {
+          const name = prompt('Projektname', st.state?.project.name ?? 'Projekt');
+          if (name) sendProject({ action: 'saveAs', name });
+        }
+        return;
+      }
+      if (handleEditorKey(e, conn, outputSize(conn.snapshot))) e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="app">
-      <StatusBar />
-      <main className="content">
-        {!snap.state ? (
-          <div className="empty">Verbinde mit dem Server …</div>
-        ) : tab === 'mapping' ? (
-          <MappingTab />
-        ) : tab === 'content' ? (
-          <ContentTab />
-        ) : tab === 'media' ? (
-          <MediaTab />
-        ) : (
-          <ProjectTab />
-        )}
-      </main>
-      <nav className="tabbar">
-        {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => choose(t.id)}>
-            <span className="tab-icon" aria-hidden>
-              {t.icon}
-            </span>
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <TopBar onOpenProjects={() => setProjectsOpen(true)} toast={toast} />
+      {!snap.state ? (
+        <div className="empty">Verbinde mit dem Server …</div>
+      ) : (
+        <div className="workspace">
+          <aside className="sidebar left">
+            <LayersPanel />
+            <MasksPanel />
+          </aside>
+          <main className="center">
+            <Toolbar />
+            <Stage />
+            <div className="shortcuts">
+              Ziehen: Ecke/Fläche · Pinch: skalieren · ⌥+Scrollen: drehen · Pfeile: 1 px (⇧ 10 px) · Tab: nächste Ecke ·
+              ⌘Z/⇧⌘Z · V Fläche · M Maske · E Bearbeiten/Show · G Gitter
+            </div>
+          </main>
+          <aside className="sidebar right">
+            <PropertiesPanel />
+            <MediaPanel />
+          </aside>
+        </div>
+      )}
+      {projectsOpen && <ProjectDialog onClose={() => setProjectsOpen(false)} />}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.level}`}>
@@ -70,20 +85,4 @@ export function App() {
       </div>
     </div>
   );
-}
-
-// localStorage kann in privaten Fenstern werfen
-function localStorageGet(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function localStorageSet(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* egal */
-  }
 }

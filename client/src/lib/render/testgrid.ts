@@ -1,4 +1,4 @@
-import { CORNER_COLORS, CORNER_LABELS } from '../lib/colors';
+import { CORNER_COLORS, CORNER_LABELS } from '../colors';
 
 /** Testbild für eine Fläche: Gitter, Diagonalen, Kreis und farbige, nummerierte Ecken. */
 export function createTestGridCanvas(size = 1024): HTMLCanvasElement {

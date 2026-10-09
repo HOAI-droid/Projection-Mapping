@@ -1,0 +1,97 @@
+/* Bearbeitungsebene – gleiche Optik in Steuerung und auf der Ausgabe */
+.editor {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: crosshair;
+}
+.editor text {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  pointer-events: none;
+}
+.ed-surface polygon {
+  fill: none;
+  stroke: #f97316;
+  stroke-width: 1.5;
+}
+.ed-surface.active polygon {
+  stroke: #22d3ee;
+  stroke-width: 2;
+}
+.ed-surface.locked polygon {
+  stroke: #9ca3af;
+  stroke-dasharray: 6 4;
+}
+.ed-surface.dim {
+  opacity: 0.45;
+}
+.ed-label {
+  fill: #fff;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: #000;
+  stroke-width: 4px;
+  opacity: 0.85;
+}
+.ed-surface.active .ed-label {
+  fill: #22d3ee;
+}
+.ed-corner circle {
+  stroke: #000;
+  stroke-width: 1.5;
+}
+.ed-corner .ed-ring {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2;
+}
+.ed-corner-label {
+  fill: #000;
+  font-size: 12px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+.ed-crosshair line {
+  stroke-width: 1;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.ed-mask polygon,
+.ed-mask polyline {
+  fill: none;
+  stroke: #e879f9;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+.ed-mask.active polygon,
+.ed-mask.active polyline {
+  stroke-width: 2;
+  stroke-dasharray: none;
+  fill: rgba(232, 121, 249, 0.12);
+}
+.ed-mask.invert polygon {
+  fill: rgba(0, 0, 0, 0.35);
+}
+.ed-mask.disabled polygon,
+.ed-mask.disabled polyline {
+  stroke: #6b7280;
+}
+.ed-mask .pt {
+  fill: #fff;
+  stroke: #000;
+  stroke-width: 1.5;
+}
+.ed-mask .pt.sel {
+  fill: #e879f9;
+}
+.ed-hint {
+  paint-order: stroke;
+  stroke: #000;
+  stroke-width: 3px;
+}

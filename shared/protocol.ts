@@ -15,15 +15,24 @@ export type ProjectAction =
 
 export type ClientMessage =
   | { t: 'hello'; role: Role }
-  | { t: 'op'; op: Op }
-  | { t: 'outputStatus'; fps: number; width: number; height: number; started: boolean }
+  /**
+   * gesture: Operationen mit derselben Gesten-ID (z. B. ein Ziehvorgang)
+   * werden als ein einziger Rückgängig-Schritt zusammengefasst.
+   */
+  | { t: 'op'; op: Op; gesture?: string; seq?: number }
+  | { t: 'undo' }
+  | { t: 'redo' }
+  | { t: 'outputStatus'; fps: number; width: number; height: number; videoBlocked: boolean }
   | ({ t: 'project' } & ProjectAction)
   | { t: 'ping'; at: number };
 
 export type ServerMessage =
   | { t: 'snapshot'; clientId: string; state: AppState; media: MediaItem[]; session: SessionMeta; presence: Presence }
-  | { t: 'op'; op: Op }
-  /** Ganzer Zustand ersetzt (z. B. nach „Projekt laden“). */
+  /** from/seq: Absender und dessen laufende Nummer – damit der Absender seine ausstehende Op bestätigt sieht */
+  | { t: 'op'; op: Op; from?: string; seq?: number }
+  /** Op des Absenders hat nichts geändert (z. B. ungültig) → trotzdem als erledigt markieren */
+  | { t: 'ack'; seq: number }
+  /** Ganzer Zustand ersetzt (z. B. nach „Projekt laden“ oder Rückgängig). */
   | { t: 'state'; state: AppState }
   | { t: 'media'; media: MediaItem[] }
   | { t: 'session'; session: SessionMeta }

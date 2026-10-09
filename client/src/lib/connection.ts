@@ -27,6 +27,11 @@ export class Connection {
   private listeners = new Set<() => void>();
   private toastListeners = new Set<(t: Toast) => void>();
   private pingTimer: number | undefined;
+  // Optimistische Anwendung: eigene Ops wirken sofort; bestätigt ist nur, was der Server zurückschickt.
+  private clientId = '';
+  private confirmed: AppState | null = null;
+  private pending: { seq: number; op: Op }[] = [];
+  private seq = 0;
 
   snapshot: Snapshot = {
     status: 'connecting',
@@ -66,9 +71,35 @@ export class Connection {
     return true;
   }
 
-  /** Operation an den Server; der lokale Zustand ändert sich erst mit dem Echo (eine Reihenfolge für alle). */
-  op(op: Op): boolean {
-    return this.send({ t: 'op', op });
+  /**
+   * Operation an den Server. Sie wirkt sofort lokal (optimistisch), damit schnelle
+   * Klicks/Tasten immer auf dem neuesten Stand aufbauen; die Reihenfolge legt der Server fest.
+   * Ops mit gleicher gesture = ein Rückgängig-Schritt.
+   */
+  op(op: Op, gesture?: string): boolean {
+    const seq = ++this.seq;
+    if (!this.send(gesture ? { t: 'op', op, gesture, seq } : { t: 'op', op, seq })) return false;
+    this.pending.push({ seq, op });
+    if (this.snapshot.state) this.update({ state: applyOp(this.snapshot.state, op) });
+    return true;
+  }
+
+  /** Bestätigten Stand + noch ausstehende eigene Ops = angezeigter Stand */
+  private recompute(): void {
+    if (!this.confirmed) return;
+    this.update({ state: this.pending.reduce((st, p) => applyOp(st, p.op), this.confirmed) });
+  }
+
+  private acknowledge(seq: number): void {
+    this.pending = this.pending.filter((p) => p.seq > seq);
+  }
+
+  undo(): void {
+    this.send({ t: 'undo' });
+  }
+
+  redo(): void {
+    this.send({ t: 'redo' });
   }
 
   private update(patch: Partial<Snapshot>): void {
@@ -112,6 +143,9 @@ export class Connection {
   private handle(msg: ServerMessage): void {
     switch (msg.t) {
       case 'snapshot':
+        this.clientId = msg.clientId;
+        this.confirmed = msg.state;
+        this.pending = [];
         this.update({
           status: 'online',
           state: msg.state,
@@ -121,9 +155,18 @@ export class Connection {
         });
         break;
       case 'op':
-        if (this.snapshot.state) this.update({ state: applyOp(this.snapshot.state, msg.op) });
+        if (!this.confirmed) break;
+        this.confirmed = applyOp(this.confirmed, msg.op);
+        if (msg.from === this.clientId && msg.seq !== undefined) this.acknowledge(msg.seq);
+        this.recompute();
+        break;
+      case 'ack':
+        this.acknowledge(msg.seq);
+        this.recompute();
         break;
       case 'state':
+        this.confirmed = msg.state;
+        this.pending = [];
         this.update({ state: msg.state });
         break;
       case 'media':
@@ -145,4 +188,4 @@ export class Connection {
   }
 }
 
-export const mediaUrl = (id: string, file: 'video.mp4' | 'thumb.jpg') => `/media/${encodeURIComponent(id)}/${file}`;
+export const mediaUrl = (id: string, file: string) => `/media/${encodeURIComponent(id)}/${encodeURIComponent(file)}`;

@@ -1,177 +1,141 @@
 # Projection Mapping
 
-Projection Mapping im Browser, für zu Hause. Ein Server im Heimnetz (Zorin OS oder Raspberry Pi) hält den Zustand und speichert alles. Das iPhone steuert, ein zweites Gerät am Beamer (iPad oder der Browser des Beamers) zeigt das Bild. Alles läuft lokal, ohne Cloud und ohne Konten.
+Projection Mapping im Browser, für zu Hause und **komplett auf einem MacBook**. Auf dem Mac-Display steuerst du, der Beamer hängt als zweiter Bildschirm dran und zeigt die Ausgabe. Ecken und Masken setzt du mit Maus oder Trackpad, wahlweise auf der Vorschau oder **direkt auf der Projektion**. Alles läuft lokal, ohne Cloud und ohne Konten.
 
-> **Stand: Phase 1 (MVP).** Vorhanden sind HTTPS-Server mit WebSocket-Sync, `/output` und `/control`, Corner Pin mit echter Homographie, Video-Upload mit Transkodierung, Testgitter sowie Projekte speichern und laden. Was später kommt, steht in [SPEC.md](SPEC.md), Abschnitt 6.
-
----
-
-## Inhalt
-
-1. [Installation auf Zorin OS](#1-installation-auf-zorin-os)
-2. [HTTPS-Zertifikat erzeugen](#2-https-zertifikat-erzeugen)
-3. [Starten](#3-starten)
-4. [Zertifikat auf iPhone und iPad vertrauen](#4-zertifikat-auf-iphone-und-ipad-vertrauen)
-5. [Beamer anschließen](#5-beamer-anschließen)
-6. [Ausgabe auf dem iPad öffnen](#6-ausgabe-auf-dem-ipad-öffnen)
-7. [Steuerung auf dem iPhone](#7-steuerung-auf-dem-iphone)
-8. [Fehlerbehebung](#8-fehlerbehebung)
-9. [Technik und Entwicklung](#9-technik-und-entwicklung)
+> **Stand: v0.2.** Neu sind Mac-Betrieb mit Chrome, mehrere Flächen (Ebenen, sperren, ausblenden, duplizieren), Masken (pro Fläche oder global, invertierbar, weiche Kante), Bilder, Farbflächen, Deckkraft, Mischmodi, Einpassung, Rückgängig/Wiederherstellen und Mapping direkt auf dem Beamer-Bild. Was noch kommt, steht in [SPEC.md](SPEC.md).
 
 ---
 
-## 1. Installation auf Zorin OS
+## 1. Installation (macOS)
 
-Zorin OS 17 basiert auf Ubuntu 22.04. Dessen eigenes Node.js ist zu alt, daher kommt Node 22 LTS aus dem NodeSource-Paketarchiv:
-
-```bash
-sudo apt update
-sudo apt install -y curl git ffmpeg mkcert libnss3-tools
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-node -v   # sollte v22.x zeigen
-```
-
-Projekt holen und Abhängigkeiten installieren:
+Gebraucht werden [Google Chrome](https://www.google.com/chrome/) und [Homebrew](https://brew.sh). Im Terminal:
 
 ```bash
+brew install node ffmpeg git
 git clone https://github.com/HOAI-droid/Projection-Mapping.git
 cd Projection-Mapping
 npm install
 ```
 
-**Raspberry Pi** (Raspberry Pi OS 64 bit): dieselben Befehle. Die Transkodierung dauert dort spürbar länger, siehe [Fehlerbehebung](#8-fehlerbehebung).
-
-**Firewall:** Ist `ufw` aktiv, die Ports freigeben:
-
-```bash
-sudo ufw allow 8443/tcp   # App (HTTPS)
-sudo ufw allow 8080/tcp   # Zertifikat-Download und Weiterleitung (HTTP)
-```
-
-## 2. HTTPS-Zertifikat erzeugen
-
-iOS gibt Kamera und Mikrofon nur über HTTPS frei. Mit `mkcert` entsteht eine lokale Zertifizierungsstelle (CA) und ein Zertifikat für alle IP-Adressen und Namen des Servers:
-
-```bash
-npm run certs
-```
-
-Das Skript legt `certs/cert.pem`, `certs/key.pem` und `certs/rootCA.pem` an. Weitere Namen oder IPs lassen sich anhängen, z. B. `npm run certs -- 192.168.178.50`.
-
-> **Wichtig:** Das Zertifikat gilt nur für die IP-Adressen, die der Server beim Erzeugen hatte. Am besten im Router eine **feste IP** für den Server vergeben (bei der FRITZ!Box: Heimnetz → Netzwerk → Gerät bearbeiten → „Diesem Netzwerkgerät immer die gleiche IPv4-Adresse zuweisen“). Ändert sich die IP trotzdem, `npm run certs` erneut ausführen. Die CA bleibt gleich, iPhone und iPad müssen also nichts neu installieren.
-
-Ohne Zertifikate läuft der Server auch, dann aber nur per HTTP auf Port 8080. Für Phase 1 reicht das, ab Phase 5 (Kamera, Mikrofon) braucht es HTTPS.
-
-## 3. Starten
+## 2. Starten
 
 ```bash
 npm start
 ```
 
-Der Befehl baut das Frontend und startet den Server. Danach stehen die Adressen im Terminal, etwa so:
+Der Befehl baut die App, startet den Server und öffnet die **Steuerung** in Chrome (`http://localhost:8080/control`). Beenden mit `Ctrl+C` im Terminal. Zertifikate oder HTTPS braucht es nicht: `localhost` gilt im Browser als sicher, auch für Kamera und Mikrofon in späteren Versionen.
 
-```
-Steuerung: https://192.168.178.50:8443/control
-Ausgabe:   https://192.168.178.50:8443/output
-Zertifikat fürs iPhone/iPad: http://192.168.178.50:8080/
-```
+## 3. Beamer anschließen
 
-Statt der IP funktioniert meist auch `https://<rechnername>.local:8443`.
+1. Beamer per **USB-C-auf-HDMI-Adapter** anschließen.
+2. **Systemeinstellungen → Displays:** Der Beamer muss als **erweiterter Bildschirm** laufen, nicht gespiegelt. Steht er auf „Spiegeln“, auf „Als erweiterter Bildschirm verwenden“ umstellen.
+3. **Auflösung des Beamers:** Wenn möglich die native Auflösung einstellen (HY300 Pro+: 1280×720). Sonst rechnet der Beamer das Bild um, und es wird weicher. Fehlt sie in der Liste, rechts neben dem Beamer auf „Erweitert …“ klicken bzw. „Alle Auflösungen anzeigen“ aktivieren.
+4. **Am Beamer:** Trapezkorrektur (Keystone, auch die automatische), 4-Punkt-Korrektur und digitalen Zoom ausschalten bzw. auf neutral stellen. Sonst verzerrt der Beamer das Bild ein zweites Mal. Scharfstellen ist natürlich erlaubt.
 
-Konfiguration über Umgebungsvariablen (optional):
+## 4. Ausgabe auf den Beamer bringen
 
-| Variable        | Standard   | Bedeutung                              |
-| --------------- | ---------- | -------------------------------------- |
-| `HTTPS_PORT`    | `8443`     | Port der App                           |
-| `HTTP_PORT`     | `8080`     | Zertifikat-Download und Weiterleitung  |
-| `DATA_DIR`      | `./data`   | Projekte und Medien                    |
-| `CERT_DIR`      | `./certs`  | Zertifikate                            |
-| `MAX_UPLOAD_MB` | `4096`     | Maximale Uploadgröße                   |
+1. In der Steuerung oben rechts auf **„Ausgabe öffnen“** klicken.
+2. Beim ersten Mal fragt Chrome: **„Fenster auf allen Bildschirmen verwalten?“** → **Zulassen.** Das Ausgabefenster erscheint dann direkt auf dem Beamer.
+   (Ohne Erlaubnis öffnet es sich als normales Fenster; dann von Hand auf den Beamer ziehen.)
+3. **Einmal in das Ausgabefenster klicken und `F` drücken** → Vollbild.
 
-Ein Autostart per systemd folgt in Phase 6.
+Die Steuerung zeigt oben „Ausgabe 1280×720 · 60 fps“, sobald alles verbunden ist.
 
-## 4. Zertifikat auf iPhone und iPad vertrauen
+## 5. Mappen
 
-Die Schritte einmal pro Gerät ausführen, **in Safari** (andere Browser können keine Profile installieren):
+**Bearbeiten- und Show-Modus** (Taste `E` oder Knopf oben): Im Bearbeitungsmodus zeigt die Ausgabe Umrisse, Ecken, Masken und den Mauszeiger. Im Show-Modus ist nur das Bild zu sehen.
 
-1. `http://<server-ip>:8080/` öffnen. Die Adresse steht im Terminal. Wichtig: **http**, nicht https.
-2. Auf **„1. Zertifikat herunterladen“** tippen und dann auf **„Zulassen“**. Es erscheint „Profil wurde geladen“.
-3. **Einstellungen** öffnen. Oben steht **„Profil geladen“** (alternativ: Allgemein → VPN und Geräteverwaltung). Das Profil „mkcert …“ wählen, dann **Installieren**, Code eingeben, **Installieren** bestätigen.
-4. **Einstellungen → Allgemein → Info → Zertifikatsvertrauenseinstellungen** (ganz unten). Den Schalter beim mkcert-Zertifikat **einschalten** und bestätigen.
-5. Zurück in Safari auf **„2. Zur App (HTTPS)“** tippen. Das Schloss erscheint, ohne Warnung.
+### Flächen (Werkzeug „Fläche“, Taste `V`)
 
-Der Beamer-Browser (Android) braucht kein Zertifikat, solange er nur `/output` ohne Kamera zeigt. Die Warnung lässt sich dort wegklicken („Erweitert → Weiter“).
+- **„+ Fläche“** links legt eine neue Fläche an. Die Liste zeigt die oberste Ebene oben. ↑/↓ ändern die Reihenfolge, 👁 blendet aus, 🔒 sperrt gegen versehentliches Verschieben. Doppelklick auf den Namen benennt um.
+- **Ecken ziehen:** auf der Bühne in der Steuerung oder **direkt auf der Projektion**. Dafür den Mauszeiger auf den Beamer-Bildschirm bewegen und die Ecke dort ziehen, wo du sie auf dem Objekt siehst. Das ist der präziseste Weg.
+- **Feinjustierung:** Ecke anklicken (oder `Tab` für die nächste Ecke), dann **Pfeiltasten** = 1 Beamer-Pixel, mit **⇧** = 10 Pixel. Auf der Projektion zeigt ein Fadenkreuz die gewählte Ecke.
+- **Ganze Fläche:** in die Fläche klicken und ziehen = verschieben. **Trackpad-Pinch** = skalieren, **⌥ + Scrollen** = drehen. Alternativ die Knöpfe unter „Transformieren“ (gedrückt halten wiederholt).
+- Ohne gewählte Ecke (`Esc`) verschieben die Pfeiltasten die ganze Fläche.
 
-## 5. Beamer anschließen
+### Inhalte (rechte Seitenleiste)
 
-**Zuerst die Beamer-Korrekturen neutral stellen:** Trapezkorrektur (Keystone, auch die automatische), 4-Punkt-Korrektur und digitalen Zoom am Magcubic HY300 Pro+ ausschalten bzw. auf 100 % setzen. Sonst verzerrt der Beamer das Bild ein zweites Mal, und die Ecken lassen sich nie sauber treffen. Scharf stellen ist erlaubt.
+**Leer, Testgitter, Farbe, Bild oder Video.** Dazu kommen Deckkraft, Mischmodus (Normal, Additiv, Bildschirm, Multiplizieren) und bei Bild/Video die Einpassung:
 
-Es gibt drei Wege zum Beamer:
+- **Strecken:** füllt die Fläche, das Seitenverhältnis kann sich ändern.
+- **Füllen:** füllt die Fläche, überstehende Ränder werden abgeschnitten.
+- **Einpassen:** zeigt das ganze Bild, freie Ränder bleiben schwarz.
 
-- **Kabel (empfohlen):** iPad → USB-C-auf-HDMI-Adapter → HDMI-Eingang des Beamers. Das bietet die geringste Latenz und die beste Bildqualität.
-  *Seitenverhältnis:* Im Spiegelmodus überträgt das iPad sein eigenes Format (≈ 4:3). Auf dem 16:9-Beamer entstehen dann schwarze Ränder links und rechts. Das Mapping funktioniert trotzdem, nur bleibt ein Teil der Beamerfläche ungenutzt. Mit Stage Manager (iPadOS 16.2+, iPad Air M1) lässt sich der externe Bildschirm **erweitern** statt spiegeln. Dann das Safari-Fenster mit `/output` auf den Beamer ziehen und auf Vollbild stellen.
-- **AirPlay/Bildschirmspiegelung:** funktioniert, wenn der Beamer AirPlay empfängt. Rechne mit Kompression und etwas Verzögerung. Für feine Videos lieber das Kabel nehmen.
-- **Direkt im Beamer-Browser:** `/output` im Chromium-Browser des Beamers öffnen. Dann ist kein iPad nötig, die Leistung ist aber schwächer (Leistungsmodus kommt in Phase 6).
+### Masken (Werkzeug „Maske“, Taste `M`)
 
-## 6. Ausgabe auf dem iPad öffnen
+Masken begrenzen, wo Licht hinfällt, z. B. nur auf das Objekt und nicht auf die Wand dahinter.
 
-1. In Safari `https://<server-ip>:8443/output` öffnen.
-2. **Teilen → Zum Home-Bildschirm.** Wird die App künftig vom Home-Bildschirm gestartet, gibt es keine Browserleiste.
-3. Die App öffnen und **einmal auf den Bildschirm tippen** („Tippen zum Starten“). Erst danach erlaubt iOS Videowiedergabe, Vollbild und „Bildschirm bleibt an“.
-4. Zur Sicherheit: **Einstellungen → Anzeige & Helligkeit → Automatische Sperre → Nie**, solange gemappt wird.
+- **Flächenmaske:** gehört zu einer Fläche und bewegt sich mit, wenn du deren Ecken änderst. **Globale Maske:** liegt fest im Beamerbild und wirkt auf alles. Welche Art neu entsteht, wählst du oben in der Werkzeugleiste.
+- **Zeichnen:** Mit dem Masken-Werkzeug ins Leere klicken, so entsteht Punkt für Punkt ein Umriss. Am besten direkt auf der Projektion um das Objekt herum klicken. **`Esc`** schließt die Maske ab.
+- **Bearbeiten:** Punkte ziehen. Ein Klick auf eine Kante fügt einen Punkt ein, **`Entf`/`⌫`** löscht den gewählten Punkt, Pfeiltasten verschieben ihn pixelgenau.
+- **Invertieren:** blendet das Innere aus statt das Äußere. **Weiche Kante:** sanfter Rand in Pixeln.
+- Mehrere normale Masken ergeben zusammen die sichtbare Fläche, invertierte Masken schneiden daraus Löcher heraus.
 
-Die Ausgabe zeigt nur die gemappten Flächen auf Schwarz, ohne Bedienelemente. Bricht die Verbindung zum Server ab, bleibt das letzte Bild stehen und die Ausgabe verbindet sich selbst neu.
+### Tastenkürzel (in Steuerung und Ausgabe)
 
-## 7. Steuerung auf dem iPhone
+| Taste | Funktion |
+| --- | --- |
+| `E` | Bearbeiten ↔ Show |
+| `F` | Vollbild (nur im Ausgabefenster) |
+| `V` / `M` | Werkzeug Fläche / Maske |
+| `G` | Testgitter über das ganze Bild an/aus |
+| Pfeile, ⇧+Pfeile | 1 px / 10 px verschieben |
+| `Tab`, ⇧`Tab` | nächste/vorige Ecke bzw. Maskenpunkt |
+| `Entf`, `⌫` | Maskenpunkt löschen |
+| `Esc` | Auswahl aufheben / Maske abschließen |
+| `⌘Z`, `⇧⌘Z` | Rückgängig / Wiederherstellen |
+| `⌘S` | Projekt speichern |
+| Pinch, ⌥+Scrollen | Fläche skalieren / drehen |
 
-`https://<server-ip>:8443/control` öffnen, am besten ebenfalls zum Home-Bildschirm hinzufügen. Oben steht der Status: Server verbunden, Ausgabe online und deren Bildrate.
+## 6. Medien und Projekte
 
-- **Mapping:** Irgendwo auf die verkleinerte Ausgabe tippen und ziehen. Der **nächstgelegene Eckpunkt** bewegt sich relativ mit, so verdeckt der Finger die Stelle nicht. **Fein** verlangsamt die Bewegung auf ein Fünftel. Mit den Tasten **1–4** wählst du einen Eckpunkt, mit den **Pfeilen** schiebst du ihn um 1 oder 10 Ausgabepixel (gedrückt halten wiederholt). Auf dem iPad mit Tastatur gehen auch die Pfeiltasten, mit Shift in 10-px-Schritten.
-  Auf der Ausgabe erscheinen Umrisse, nummerierte Ecken und ein Fadenkreuz am gewählten Eckpunkt. Mit **„Umrisse auf Ausgabe“** blendest du sie aus. **Testbild** projiziert ein Gitter oder eine weiße Fläche über die ganze Ausgabe.
-- **Inhalt:** Leer, Testgitter oder Video. Für Videos gibt es Abspielen/Pause, Schleife und Tempo.
-- **Medien:** **„Video hochladen“** öffnet die Mediathek. Der Server wandelt das Video in H.264 um (max. 1280×720, ohne Ton, iPhone-HDR wird nach SDR umgerechnet) und erstellt ein Vorschaubild.
-- **Projekt:** Speichern, Speichern unter, Neu, Laden, Umbenennen und Löschen. Auch ungespeicherte Änderungen überstehen einen Neustart des Servers.
+- **Medien:** Videos und Bilder in den Bereich „Medien“ ziehen oder „+ Hochladen“ klicken. iPhone-Fotos im HEIC-Format gehen auch. Videos werden in H.264 umgewandelt (max. 1280×720, ohne Ton, iPhone-HDR wird angepasst), auf dem Mac mit dem Hardware-Encoder, also schnell. „Zuweisen“ legt das Medium auf die gewählte Fläche.
+- **Projekte:** Speichern (`⌘S`), Speichern unter, über „Projekte …“ laden, umbenennen, löschen und neu anlegen. Ungespeicherte Änderungen überstehen auch einen Neustart.
+- Alle Daten liegen im Ordner `data/` im Projektverzeichnis.
 
-Die Farben der Ecken sind überall gleich: 1 rot (oben links), 2 grün (oben rechts), 3 blau (unten rechts), 4 gelb (unten links).
+## 7. Tipps für den Mac
+
+- **Netzteil anschließen**, wenn länger projiziert wird. Die Ausgabe hält den Bildschirm wach (Wake Lock), solange das Fenster sichtbar ist.
+- **Nicht stören** einschalten, damit keine Mitteilungen aufs Bild kommen.
+- **Menüleiste auf dem Beamer:** Fährt die Maus im Vollbild an den oberen Rand, blendet macOS die Menüleiste ein. Ecken ganz oben dann über die Pfeiltasten justieren.
+- **„Getrennte Spaces für Displays“** (Systemeinstellungen → Schreibtisch & Dock → Mission Control) eingeschaltet lassen, sonst funktioniert das Vollbild auf dem zweiten Bildschirm nicht richtig.
 
 ## 8. Fehlerbehebung
 
 | Problem | Lösung |
 | --- | --- |
-| Safari meldet „Diese Verbindung ist nicht privat“ | Zertifikat installieren **und** unter Zertifikatsvertrauenseinstellungen aktivieren (Abschnitt 4). Hat sich die Server-IP geändert, `npm run certs` erneut ausführen und den Server neu starten. |
-| Seite lädt gar nicht | Sind iPhone/iPad im selben WLAN (nicht im Gast-WLAN)? Firewall-Ports freigegeben? Läuft `npm start` noch? |
-| Steuerung zeigt „Keine Ausgabe“ | `/output` ist auf keinem Gerät offen oder das iPad ist gesperrt. Wird die Ausgabe-App wieder in den Vordergrund geholt, verbindet sie sich automatisch neu. |
-| Hinweis „Auf der Ausgabe einmal Tippen zum Starten antippen“ | Wie beschrieben auf dem iPad tippen. Ohne diesen Tipp spielt iOS keine Videos ab. |
-| Video bleibt bei „Umwandeln …“ hängen oder zeigt einen Fehler | Ist `ffmpeg -version` installiert? Die Fehlermeldung steht in der Medienliste und im Server-Terminal. Lange 4K-Videos dauern auf dem Raspberry Pi mehrere Minuten, also vorher in der Fotos-App kürzen. |
-| Upload bricht ab | Sehr große Dateien: `MAX_UPLOAD_MB` erhöhen oder Video kürzen. iOS wandelt Videos beim Hochladen manchmal schon selbst um, das dauert einen Moment. |
-| Bild ist auf dem Beamer verzerrt, obwohl die Ecken stimmen | Keystone, Zoom und 4-Punkt-Korrektur am Beamer abschalten (Abschnitt 5). Mit dem Testbild „Gitter“ prüfen: Der Kreis muss rund sein. |
-| Ruckeln | In der Steuerung die fps der Ausgabe prüfen. AirPlay durch Kabel ersetzen. Auf dem Beamer-Browser hilft später der Leistungsmodus (Phase 6). |
-| iPad geht nach einiger Zeit aus | Automatische Sperre auf „Nie“ stellen. Der Wake Lock funktioniert erst ab iPadOS 16.4 und nach dem Start-Tipp. |
+| „Ausgabe öffnen“ tut nichts | Chrome hat das Pop-up blockiert: In der Adressleiste das Pop-up-Symbol anklicken → immer erlauben. Dann erneut klicken. |
+| Ausgabe erscheint nicht auf dem Beamer | Erlaubnis „Fenster verwalten“ prüfen (Schloss-Symbol in der Adressleiste → Website-Einstellungen). Oder Fenster von Hand rüberziehen und `F` drücken. |
+| Beamer zeigt das Mac-Display gespiegelt | Systemeinstellungen → Displays → Beamer „als erweiterten Bildschirm“ verwenden. |
+| Bild verzerrt, obwohl die Ecken stimmen | Keystone, Zoom und 4-Punkt-Korrektur am Beamer abschalten. Mit `G` (Gitter) prüfen: Der Kreis muss rund sein. |
+| Bild unscharf | Mac-Auflösung für den Beamer auf dessen native Auflösung stellen (Abschnitt 3). |
+| Steuerung zeigt „Ausgabe einmal anklicken“ | Ins Ausgabefenster klicken. Danach darf der Browser Videos starten. |
+| Video bleibt bei „Umwandeln …“ | Mit `ffmpeg -version` prüfen, ob ffmpeg installiert ist. Die Fehlermeldung steht in der Medienliste und im Terminal. |
+| Port belegt | `HTTP_PORT=8090 npm start` |
 
-## 9. Technik und Entwicklung
+Einstellungen über Umgebungsvariablen: `HTTP_PORT` (8080), `DATA_DIR` (`./data`), `MAX_UPLOAD_MB` (4096), `NO_OPEN=1` (Chrome nicht automatisch öffnen).
 
-### Aufbau
+## Anhang: iPhone als Fernbedienung (optional)
+
+Die Steuerung lässt sich zusätzlich vom iPhone aus bedienen. Starte dafür den Server mit `HOST=0.0.0.0 npm start` und öffne `http://<Mac-Name>.local:8080/control`. Für spätere Funktionen mit Kamera oder Mikrofon am iPhone braucht es HTTPS: `brew install mkcert nss`, `npm run certs`, danach das Root-Zertifikat unter `http://<Mac-Name>.local:8080/` auf dem iPhone installieren und unter Einstellungen → Allgemein → Info → Zertifikatsvertrauenseinstellungen aktivieren. Die App läuft dann auf Port 8443.
+
+## Technik und Entwicklung
 
 ```
-server/     Node.js + TypeScript: Express (HTTPS), WebSocket (ws), Upload (multer), ffmpeg
-shared/     Gemeinsamer Code: Datentypen, Zustands-Reducer, Homographie (+ Tests)
-client/     Vite: /control (React), /output (WebGL2, ohne Framework)
-scripts/    certs.mjs (mkcert)
-data/       Laufzeitdaten: current.json, projects/*.json, media/<id>/{video.mp4,thumb.jpg,meta.json}
+server/   Node.js + TypeScript: Express, WebSocket (ws), Upload (multer), ffmpeg/sips
+shared/   Datentypen, Zustands-Reducer, Homographie, Geometrie (+ Unit-Tests)
+client/   Vite + React: /control (Steuerung), /output (Ausgabe)
+          lib/render  WebGL2-Renderer, Medien, Masken (von Vorschau und Ausgabe gemeinsam genutzt)
+          lib/editor  Bearbeitungsebene (Ecken, Masken) + Tastenkürzel, ebenfalls gemeinsam
 ```
 
-- **Zustand:** Der Server ist die einzige Quelle der Wahrheit. Clients schicken *Operationen* (z. B. `setCorner`). Der Server prüft sie, wendet sie mit demselben Reducer (`shared/state.ts`) an und verteilt sie an alle. So sehen alle Clients dieselbe Reihenfolge. Beim Verbinden oder Wiederverbinden schickt der Server einen vollständigen Snapshot.
-- **Renderer:** WebGL2 direkt, ohne Bibliothek. Pro Fläche wird nur ihr Begrenzungsrechteck gezeichnet. Der Fragment-Shader rechnet jeden Pixel mit der **inversen Homographie** zurück in die Inhaltskoordinate. Damit ist die Perspektive pixelgenau, ohne Knick an der Diagonalen. Die Kanten werden um 1 px geglättet.
-  *Warum ohne Three.js/regl?* Gebraucht werden ein Shader-Programm pro Effekt, Texturen und ein Rechteck. Three.js brächte ~600 kB Szenengraph, Kamera und Materialsystem mit, die hier nur im Weg stünden, besonders auf dem schwachen Beamer-Browser. regl zielt auf WebGL 1 und wird kaum noch gepflegt. Das eigene Gerüst ist ~150 Zeilen lang, und die Effekte (Phase 3) sind einfach weitere Fragment-Shader.
-- **Video:** Ein `<video muted playsinline>` pro Medium, Upload in die Textur nur bei neuem Bild (`requestVideoFrameCallback`).
-
-### Befehle
+- **Zustand:** Der Server ist die einzige Quelle der Wahrheit. Fenster schicken Operationen (z. B. `setCorner`), der Server prüft sie, wendet sie mit demselben Reducer an und verteilt sie in fester Reihenfolge. Jedes Fenster wendet seine eigenen Operationen sofort an (optimistisch) und gleicht sie mit dem Echo ab. Schnelle Klicks und Tastenwiederholungen gehen so nicht verloren. Rückgängig/Wiederherstellen läuft auf dem Server, eine Ziehbewegung zählt als ein Schritt.
+- **Renderer:** WebGL2 ohne Bibliothek. Der Fragment-Shader rechnet jeden Pixel mit der inversen Homographie in die Inhaltskoordinate zurück. Das ergibt pixelgenaue Perspektive ohne Knick an der Diagonalen. Masken werden per Canvas 2D (mit Weichzeichner) in Alpha-Texturen gerastert: Flächenmasken im Inhaltsraum der Fläche, globale Masken im Ausgaberaum. Gearbeitet wird mit vormultipliziertem Alpha, daraus folgen die Mischmodi.
+- Die Steuerung zeigt eine Live-Vorschau mit demselben Renderer.
 
 ```bash
-npm run dev        # Entwicklungsmodus mit Hot Reload (gleiche Ports, HTTPS falls Zertifikate da)
-npm test           # Unit-Tests (Homographie, Zustand)
+npm run dev        # Entwicklungsmodus mit Hot Reload
+npm test           # Unit-Tests (Homographie, Geometrie, Zustand, Rückgängig)
 npm run typecheck  # TypeScript strikt prüfen
 npm run build      # Produktions-Build nach dist/
-npm run serve      # Gebaute Version starten (ohne neu zu bauen)
 ```

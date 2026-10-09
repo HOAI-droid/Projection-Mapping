@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { newId } from '../shared/ids.js';
 import type { ClientMessage, Role, ServerMessage } from '../shared/protocol.js';
 import { parseOp } from '../shared/state.js';
-import type { OutputInfo, Presence } from '../shared/types.js';
+import type { OutputInfo, Presence, SessionMeta } from '../shared/types.js';
 import type { MediaLibrary } from './media.js';
 import { StoreError, type Store } from './store.js';
 
@@ -69,7 +69,9 @@ export class Hub {
     for (const c of this.clients) {
       if (c.role === 'control') controls++;
       if (c.role === 'output') {
-        outputs.push(c.output ?? { clientId: c.id, fps: 0, width: 0, height: 0, started: false, userAgent: c.userAgent });
+        outputs.push(
+          c.output ?? { clientId: c.id, fps: 0, width: 0, height: 0, videoBlocked: false, userAgent: c.userAgent },
+        );
       }
     }
     return { outputs, controls };
@@ -128,11 +130,21 @@ export class Hub {
     switch (msg.t) {
       case 'op': {
         const op = parseOp(msg.op);
-        if (!op) return;
-        const wasDirty = this.store.session.dirty;
-        this.store.apply(op);
-        this.broadcast({ t: 'op', op });
-        if (wasDirty !== this.store.session.dirty) this.broadcast({ t: 'session', session: this.store.session });
+        const seq = typeof msg.seq === 'number' && Number.isInteger(msg.seq) ? msg.seq : undefined;
+        const gesture = typeof msg.gesture === 'string' ? msg.gesture.slice(0, 64) : undefined;
+        const before = sessionKey(this.store.session);
+        if (!op || !this.store.apply(op, gesture)) {
+          if (seq !== undefined) this.send(c, { t: 'ack', seq });
+          return;
+        }
+        this.broadcast({ t: 'op', op, from: c.id, seq });
+        if (sessionKey(this.store.session) !== before) this.broadcast({ t: 'session', session: this.store.session });
+        return;
+      }
+      case 'undo':
+      case 'redo': {
+        const ok = msg.t === 'undo' ? this.store.undo() : this.store.redo();
+        if (ok) this.broadcastState();
         return;
       }
       case 'outputStatus': {
@@ -143,7 +155,7 @@ export class Hub {
           fps: num(msg.fps),
           width: num(msg.width),
           height: num(msg.height),
-          started: msg.started === true,
+          videoBlocked: msg.videoBlocked === true,
           userAgent: c.userAgent,
         };
         this.broadcastPresence();
@@ -198,4 +210,9 @@ export class Hub {
       this.send(c, { t: 'toast', level: 'error', message });
     }
   }
+}
+
+/** Nur die Felder, die sich durch eine Operation ändern können */
+function sessionKey(s: SessionMeta): string {
+  return `${s.dirty}|${s.canUndo}|${s.canRedo}`;
 }
