@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0e0f12" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>Projection Mapping</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 24px; background: #0e0f12; color: #e7e9ee; font: 17px/1.5 -apple-system, system-ui, sans-serif; }
+      main { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+      a.btn { display: block; padding: 18px; border-radius: 14px; background: #20232a; border: 1px solid #2c3038; color: inherit; text-decoration: none; }
+      a.btn b { display: block; font-size: 20px; }
+      a.btn span { color: #8b919c; font-size: 15px; }
+      .small { color: #8b919c; font-size: 14px; }
+      .warn { color: #eab308; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Projection Mapping</h1>
+      <a class="btn" href="/control"><b>Steuerung</b><span>Auf dem iPhone öffnen</span></a>
+      <a class="btn" href="/output"><b>Ausgabe</b><span>Auf dem Gerät am Beamer öffnen (iPad oder Beamer-Browser)</span></a>
+      <p class="small" id="https"></p>
+      <p class="small">Tipp: In Safari „Teilen → Zum Home-Bildschirm“ – dann verschwindet die Browserleiste.</p>
+    </main>
+    <script type="module">
+      const el = document.getElementById('https');
+      if (location.protocol !== 'https:') {
+        el.className = 'small warn';
+        el.textContent = 'Achtung: Verbindung ohne HTTPS. Für Kamera und Mikrofon (spätere Phasen) „npm run certs“ auf dem Server ausführen.';
+      } else {
+        el.innerHTML = 'Zertifikat noch nicht installiert? <a href="/rootCA.crt" style="color:#3b82f6">Root-Zertifikat herunterladen</a>';
+      }
+    </script>
+  </body>
+</html>
